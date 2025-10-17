@@ -1,0 +1,23 @@
+[profile.default]
+src = "contracts"
+out = "out"
+libs = ["lib"]
+test = "test"
+cache_path = "cache"
+
+optimizer = true
+optimizer_runs = 1000000
+via_ir = true
+
+fuzz = { runs = 1000 }
+invariant = { runs = 256, depth = 15 }
+
+gas_reports = ["*"]
+
+solc_version = "0.8.26"
+evm_version = "cancun"
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = true
