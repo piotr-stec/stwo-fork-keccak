@@ -1,6 +1,8 @@
 #![feature(portable_simd, iter_array_chunks, array_chunks)]
 pub mod blake;
+pub mod keccak_demo;
 pub mod plonk;
+pub mod plonk_keccak;
 pub mod poseidon;
 pub mod state_machine;
 pub mod wide_fibonacci;

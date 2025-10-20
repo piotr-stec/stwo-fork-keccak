@@ -2,6 +2,8 @@
 
 pub mod blake2_hash;
 pub mod blake2_merkle;
+pub mod keccak_hash;
+pub mod keccak_merkle;
 pub mod blake3_hash;
 pub mod hash;
 mod merkle_hasher;
