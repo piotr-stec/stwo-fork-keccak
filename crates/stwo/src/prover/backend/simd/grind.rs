@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use tracing::{span, Level};
 
 use super::SimdBackend;
-use crate::core::channel::Blake2sChannel;
+use crate::core::channel::{Blake2sChannel, KeccakChannel, Channel};
 use crate::core::proof_of_work::GrindOps;
 use crate::core::vcs::blake2_hash::Blake2sHasher;
 use crate::prover::backend::simd::blake2s::hash_16;
@@ -161,6 +161,20 @@ pub mod poseidon252 {
             }
         }
         None
+    }
+}
+
+// Simple implementation for KeccakChannel using CPU-style approach
+impl GrindOps<KeccakChannel> for SimdBackend {
+    fn grind(channel: &KeccakChannel, pow_bits: u32) -> u64 {
+        // For now, use simple CPU approach - can be optimized later with SIMD
+        let mut nonce = 0;
+        loop {
+            if channel.verify_pow_nonce(pow_bits, nonce) {
+                return nonce;
+            }
+            nonce += 1;
+        }
     }
 }
 

@@ -126,6 +126,8 @@ mod tests {
         state.update(b"b");
         let hash = state.finalize_reset();
         let hash_empty = state.finalize();
+        println!("Hash after reset: {}", hash.to_string());
+        println!("Hash of empty: {}", hash_empty.to_string());
 
         assert_eq!(hash.to_string(), Blake2sHasher::hash(b"ab").to_string());
         assert_eq!(hash_empty.to_string(), Blake2sHasher::hash(b"").to_string());
