@@ -230,7 +230,7 @@ contract KeccakChannel is IChannel {
         // Fallback: force valid values (should be extremely rare)
         revert("KeccakChannel: Failed to generate valid base felts");
     }
-    
+
     /**
      * @notice Convert u32 to little-endian bytes
      */
@@ -277,4 +277,103 @@ contract KeccakChannel is IChannel {
         
         return zeros;
     }
+    
+    /**
+     * @notice Hash two elements sequentially like Rust keccak.update(element1).update(element2)
+     * @param left First element to hash
+     * @param right Second element to hash
+     * @return Final hash after sequential updates
+     */
+    function mixRoot(bytes32 left, bytes32 right) external returns (bytes32) {
+        bytes32 newDigest = keccak256(abi.encodePacked(left, right));
+        // Equivalent to: keccak.update(element1).update(element2).finalize()
+        digest = newDigest;
+        return newDigest;
+    }
+    
+    // /**
+    //  * @notice Hash two u32 arrays sequentially like Rust keccak implementation
+    //  * @param array1 First u32 array to hash
+    //  * @param array2 Second u32 array to hash
+    //  * @return Final hash after sequential updates
+    //  */
+    // function hashTwoU32Arrays(uint32[] calldata array1, uint32[] calldata array2) external pure returns (bytes32) {
+    //     bytes memory input = "";
+        
+    //     // Add first array in little-endian format
+    //     for (uint256 i = 0; i < array1.length; i++) {
+    //         input = abi.encodePacked(input, _u32ToLittleEndian(array1[i]));
+    //     }
+        
+    //     // Add second array in little-endian format
+    //     for (uint256 i = 0; i < array2.length; i++) {
+    //         input = abi.encodePacked(input, _u32ToLittleEndian(array2[i]));
+    //     }
+        
+    //     return keccak256(input);
+    // }
+    
+    // /**
+    //  * @notice Incremental hasher that mimics Rust keccak.update() pattern
+    //  * @dev Maintains state between updates, call finalize() to get final hash
+    //  */
+    // struct IncrementalHasher {
+    //     bytes data;
+    //     bool finalized;
+    // }
+    
+    // /**
+    //  * @notice Create new incremental hasher
+    //  * @return hasher New hasher instance
+    //  */
+    // function newIncrementalHasher() external pure returns (IncrementalHasher memory hasher) {
+    //     hasher.data = "";
+    //     hasher.finalized = false;
+    // }
+    
+    // /**
+    //  * @notice Update hasher with bytes32 element
+    //  * @param hasher Hasher state to update
+    //  * @param element Element to add
+    //  * @return Updated hasher state
+    //  */
+    // function updateHasher(IncrementalHasher memory hasher, bytes32 element) 
+    //     external 
+    //     pure 
+    //     returns (IncrementalHasher memory) 
+    // {
+    //     require(!hasher.finalized, "Hasher already finalized");
+    //     hasher.data = abi.encodePacked(hasher.data, element);
+    //     return hasher;
+    // }
+    
+    // /**
+    //  * @notice Update hasher with u32 array in little-endian format
+    //  * @param hasher Hasher state to update
+    //  * @param elements U32 array to add
+    //  * @return Updated hasher state
+    //  */
+    // function updateHasherU32s(IncrementalHasher memory hasher, uint32[] calldata elements)
+    //     external
+    //     pure
+    //     returns (IncrementalHasher memory)
+    // {
+    //     require(!hasher.finalized, "Hasher already finalized");
+        
+    //     for (uint256 i = 0; i < elements.length; i++) {
+    //         hasher.data = abi.encodePacked(hasher.data, _u32ToLittleEndian(elements[i]));
+    //     }
+        
+    //     return hasher;
+    // }
+    
+    // /**
+    //  * @notice Finalize hasher and get final hash
+    //  * @param hasher Hasher state to finalize
+    //  * @return Final hash result
+    //  */
+    // function finalizeHasher(IncrementalHasher memory hasher) external pure returns (bytes32) {
+    //     require(!hasher.finalized, "Hasher already finalized");
+    //     return keccak256(hasher.data);
+    // }
 }

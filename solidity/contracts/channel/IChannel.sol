@@ -58,4 +58,18 @@ interface IChannel {
      * @return values Array of random 32-bit values (length depends on hash function)
      */
     function drawU32s() external returns (uint32[] memory values);
+    
+    /**
+     * @notice Get current channel digest
+     * @return digest Current hash digest state
+     */
+    function getDigest() external view returns (bytes32 digest);
+    
+    /**
+     * @notice Mix two elements sequentially (digest, commitment)
+     * @param currentDigest Current digest state
+     * @param commitment Commitment to mix
+     * @return newDigest Updated digest after mixing
+     */
+    function mixRoot(bytes32 currentDigest, bytes32 commitment) external returns (bytes32 newDigest);
 }
