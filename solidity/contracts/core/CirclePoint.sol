@@ -2,13 +2,14 @@
 pragma solidity ^0.8.20;
 
 import "../fields/QM31Field.sol";
-import "../channel/IChannel.sol";
+import "../libraries/KeccakChannelLib.sol";
 
 /// @title CirclePoint
 /// @notice A point on the complex circle, treated as an additive group
 /// @dev Implements circle group operations for x² + y² = 1
 library CirclePoint {
     using QM31Field for QM31Field.QM31;
+    using KeccakChannelLib for KeccakChannelLib.ChannelState;
 
     /// @notice Represents a point on the circle with coordinates (x, y)
     /// @dev Both x and y are elements of the SecureField (QM31)
@@ -103,13 +104,14 @@ library CirclePoint {
         return result;
     }
 
-    /// @notice Generates a random point on the circle using channel randomness
+
+    /// @notice Generates a random point on the circle using channel state directly
     /// @dev Uses Fiat-Shamir transform to generate cryptographically secure random point
-    /// @param channel The channel providing randomness
+    /// @param channelState The channel state providing randomness
     /// @return A random point on the circle
-    function getRandomPoint(IChannel channel) internal returns (Point memory) {
-        // Draw random element t from secure field
-        QM31Field.QM31 memory t = channel.drawSecureFelt();
+    function getRandomPointFromState(KeccakChannelLib.ChannelState storage channelState) internal returns (Point memory) {
+        // Draw random element t from secure field using library
+        QM31Field.QM31 memory t = channelState.drawSecureFelt();
         
         // Compute t²
         QM31Field.QM31 memory tSquare = QM31Field.square(t);
