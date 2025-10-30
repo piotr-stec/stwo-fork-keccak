@@ -4,19 +4,20 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../../contracts/core/CirclePoint.sol";
 import "../../contracts/fields/QM31Field.sol";
-import "../../contracts/channel/KeccakChannel.sol";
+import "../../contracts/libraries/KeccakChannelLib.sol";
 
 /// @title CirclePointTest
 /// @notice TDD tests for CirclePoint library, comparing results with Rust implementation
 contract CirclePointTest is Test {
     using CirclePoint for CirclePoint.Point;
     using QM31Field for QM31Field.QM31;
+    using KeccakChannelLib for KeccakChannelLib.ChannelState;
     
-    // Deploy channel once for all tests
-    KeccakChannel channel;
+    // Channel state for all tests
+    KeccakChannelLib.ChannelState channel;
     
     function setUp() public {
-        channel = new KeccakChannel();
+        channel.initialize();
     }
 
     /// @notice Test the zero element (identity) of circle group
@@ -198,20 +199,18 @@ contract CirclePointTest is Test {
 
     /// @notice Test getRandomPoint function
     function testGetRandomPoint() public {
-        // Use pre-deployed channel from setUp()
-        
         // Initialize channel with known seed for reproducible test
         channel.updateDigest(keccak256("test_seed_for_circle_point"));
         
-        // Generate random point
-        CirclePoint.Point memory randomPoint = CirclePoint.getRandomPoint(IChannel(address(channel)));
+        // Generate random point using library function
+        CirclePoint.Point memory randomPoint = CirclePoint.getRandomPointFromState(channel);
         
         // The random point should be on the circle
         assertEq(CirclePoint.isOnCircle(randomPoint), true, "Random point should be on circle");
         
         // Generate another point - should be different (with very high probability)
         channel.updateDigest(keccak256("different_seed"));
-        CirclePoint.Point memory randomPoint2 = CirclePoint.getRandomPoint(IChannel(address(channel)));
+        CirclePoint.Point memory randomPoint2 = CirclePoint.getRandomPointFromState(channel);
         
         assertEq(CirclePoint.isOnCircle(randomPoint2), true, "Second random point should be on circle");
         
@@ -220,11 +219,22 @@ contract CirclePointTest is Test {
         assertEq(areEqual, false, "Different seeds should produce different points");
     }
 
-    /// @notice Test deployment cost specifically
-    function testDeploymentCost() public {
-        KeccakChannel newChannel = new KeccakChannel();
-        // Just deployment, nothing else
-        assertTrue(address(newChannel) != address(0), "Channel should be deployed");
+    /// @notice Test library initialization cost
+    function testLibraryInitializationCost() public {
+        // Test manual initialization (since memory structs start with zero values)
+        KeccakChannelLib.ChannelState memory newChannel;
+        
+        // Memory structs are automatically initialized with zero values
+        assertEq(newChannel.digest, bytes32(0), "Channel should be initialized with zero digest");
+        assertEq(newChannel.nDraws, 0, "Channel should be initialized with zero draws");
+        
+        // Test that we can use storage initialization 
+        uint256 gasBefore = gasleft();
+        channel.clearState(); // This is essentially the same as initialize
+        uint256 gasUsed = gasBefore - gasleft();
+        
+        // Library operations should be very cheap
+        assertTrue(gasUsed < 1000, "Library operations should use minimal gas");
     }
 
     /// @notice Test compatibility with known Rust values
@@ -254,5 +264,56 @@ contract CirclePointTest is Test {
         CirclePoint.Point memory extendedPoint = CirclePoint.intoEF(point);
         assertEq(QM31Field.eq(extendedPoint.x, point.x), true, "intoEF preserves x");
         assertEq(QM31Field.eq(extendedPoint.y, point.y), true, "intoEF preserves y");
+    }
+
+    /// @notice Test channel library functionality
+    function testChannelLibraryFunctionality() public {
+        // Test drawing from channel using library functions
+        QM31Field.QM31 memory randomFelt = channel.drawSecureFelt();
+        
+        // Should be valid M31 field elements
+        assertTrue(randomFelt.first.real < 2147483647, "First real should be valid M31");
+        assertTrue(randomFelt.first.imag < 2147483647, "First imag should be valid M31");
+        assertTrue(randomFelt.second.real < 2147483647, "Second real should be valid M31");
+        assertTrue(randomFelt.second.imag < 2147483647, "Second imag should be valid M31");
+        
+        // Test U32 drawing
+        uint32[] memory randomU32s = channel.drawU32s();
+        assertEq(randomU32s.length, 8, "Should return 8 u32 values");
+        
+        // Test mixing
+        uint32[] memory data = new uint32[](4);
+        data[0] = 0x12345678;
+        data[1] = 0x9abcdef0;
+        data[2] = 0x11111111;
+        data[3] = 0x22222222;
+        
+        bytes32 digestBefore = channel.digest;
+        channel.mixU32s(data);
+        bytes32 digestAfter = channel.digest;
+        
+        assertTrue(digestBefore != digestAfter, "Digest should change after mixing");
+    }
+
+    /// @notice Test random point generation with different seeds
+    function testRandomPointWithDifferentSeeds() public {
+        // Generate points with different seeds using storage channel
+        // (getRandomPointFromState requires storage reference)
+        
+        // Generate first point with seed1
+        channel.updateDigest(keccak256("seed1"));
+        CirclePoint.Point memory point1 = CirclePoint.getRandomPointFromState(channel);
+        
+        // Generate second point with seed2
+        channel.updateDigest(keccak256("seed2"));
+        CirclePoint.Point memory point2 = CirclePoint.getRandomPointFromState(channel);
+        
+        // Both should be on circle
+        assertEq(CirclePoint.isOnCircle(point1), true, "Point 1 should be on circle");
+        assertEq(CirclePoint.isOnCircle(point2), true, "Point 2 should be on circle");
+        
+        // Should be different
+        bool areEqual = QM31Field.eq(point1.x, point2.x) && QM31Field.eq(point1.y, point2.y);
+        assertEq(areEqual, false, "Different seeds should produce different points");
     }
 }
