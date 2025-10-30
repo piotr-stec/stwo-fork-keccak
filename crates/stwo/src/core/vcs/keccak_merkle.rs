@@ -61,6 +61,7 @@ impl MerkleChannel for KeccakMerkleChannel {
     }
 }
 
+<<<<<<< HEAD
 #[cfg(all(test, feature = "prover"))]
 mod tests {
     use crate::core::fields::m31::BaseField;
@@ -124,6 +125,28 @@ mod tests {
         // Hashes should be different (different algorithms)
         assert_ne!(keccak_hash.0.to_vec(), blake2s_hash.0.to_vec());
 
+=======
+#[cfg(test)]
+mod tests {
+    use crate::core::fields::m31::BaseField;
+    use crate::core::vcs::keccak_merkle::KeccakMerkleHasher;
+    use crate::core::vcs::MerkleHasher;
+
+    #[test]
+    fn test_hash_comparison_with_blake2s() {
+        use crate::core::vcs::blake2_merkle::Blake2sMerkleHasher;
+        
+        // Create test data
+        let values = vec![BaseField::from(1), BaseField::from(2), BaseField::from(3)];
+        
+        // Hash with both implementations
+        let keccak_hash = KeccakMerkleHasher::hash_node(None, &values);
+        let blake2s_hash = Blake2sMerkleHasher::hash_node(None, &values);
+        
+        // Hashes should be different (different algorithms)
+        assert_ne!(keccak_hash.0.to_vec(), blake2s_hash.0.to_vec());
+        
+>>>>>>> origin/channel/solidity
         // But both should be non-zero
         assert_ne!(keccak_hash.0, [0u8; 32]);
         assert_ne!(blake2s_hash.0, [0u8; 32]);
@@ -132,6 +155,7 @@ mod tests {
     #[test]
     fn test_leaf_vs_node_hashing() {
         let values = vec![BaseField::from(42)];
+<<<<<<< HEAD
 
         // Hash as leaf (no children)
         let leaf_hash = KeccakMerkleHasher::hash_node(None, &values);
@@ -140,6 +164,16 @@ mod tests {
         let dummy_child = leaf_hash;
         let node_hash = KeccakMerkleHasher::hash_node(Some((dummy_child, dummy_child)), &values);
 
+=======
+        
+        // Hash as leaf (no children)
+        let leaf_hash = KeccakMerkleHasher::hash_node(None, &values);
+        
+        // Hash as node (with dummy children)
+        let dummy_child = leaf_hash;
+        let node_hash = KeccakMerkleHasher::hash_node(Some((dummy_child, dummy_child)), &values);
+        
+>>>>>>> origin/channel/solidity
         // Should produce different hashes due to different prefixes
         assert_ne!(leaf_hash, node_hash);
     }
@@ -147,6 +181,7 @@ mod tests {
     #[test]
     fn test_deterministic_hashing() {
         let values = vec![BaseField::from(123), BaseField::from(456)];
+<<<<<<< HEAD
 
         let hash1 = KeccakMerkleHasher::hash_node(None, &values);
         let hash2 = KeccakMerkleHasher::hash_node(None, &values);
@@ -155,3 +190,13 @@ mod tests {
         assert_eq!(hash1, hash2);
     }
 }
+=======
+        
+        let hash1 = KeccakMerkleHasher::hash_node(None, &values);
+        let hash2 = KeccakMerkleHasher::hash_node(None, &values);
+        
+        // Should be deterministic
+        assert_eq!(hash1, hash2);
+    }
+}
+>>>>>>> origin/channel/solidity
