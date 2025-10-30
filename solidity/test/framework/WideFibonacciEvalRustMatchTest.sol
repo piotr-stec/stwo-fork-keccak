@@ -7,7 +7,6 @@ import "../../contracts/framework/WideFibonacciEval.sol";
 import "../../contracts/framework/PointEvaluatorLib.sol";
 import "../../contracts/core/PointEvaluationAccumulator.sol";
 import "../../contracts/fields/QM31Field.sol";
-import "../../contracts/core/CanonicCoset.sol";
 import "../../contracts/core/CirclePoint.sol";
 
 /// @title WideFibonacciEvalRustMatchTest
@@ -16,7 +15,6 @@ import "../../contracts/core/CirclePoint.sol";
 contract WideFibonacciEvalRustMatchTest is Test {
     using QM31Field for QM31Field.QM31;
     using PointEvaluationAccumulator for PointEvaluationAccumulator.Accumulator;
-    using CanonicCoset for CanonicCoset.CanonicCosetStruct;
 
     WideFibonacciEval wideFibEval;
     
@@ -79,26 +77,7 @@ contract WideFibonacciEvalRustMatchTest is Test {
         
         }
 
-    // /// @notice Test with different n_columns to match various Rust test scenarios
-    // function testDifferentColumnCounts() public {
-    //     console.log("=== Testing Different Column Counts ===");
-        
-    //     uint256[] memory columnCounts = new uint256[](4);
-    //     columnCounts[0] = 5;
-    //     columnCounts[1] = 10;
-    //     columnCounts[2] = 15;
-    //     columnCounts[3] = 20;
-        
-    //     for (uint256 i = 0; i < columnCounts.length; i++) {
-    //         console.log("\nTesting with %d columns:", columnCounts[i]);
-    //         _runTestWithColumns(3, columnCounts[i]);
-    //     }
-    // }
-
-    // =============================================================================
-    // Helper Functions
-    // =============================================================================
-
+  
     /// @notice Create mask exactly matching Rust test data
     /// @dev Creates mask where each column has value (i+1): [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     function _createRustMatchingMask(uint256 n_columns) internal pure returns (QM31Field.QM31[][][] memory mask) {
