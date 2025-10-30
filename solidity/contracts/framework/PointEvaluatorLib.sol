@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
-import "./IEvalAtRow.sol";
 import "../core/PointEvaluationAccumulator.sol";
 import "../fields/QM31Field.sol";
 import "../pcs/TreeVec.sol";
@@ -107,12 +106,13 @@ library PointEvaluatorLib {
     /// @param self The PointEvaluator struct
     /// @param interaction Interaction index
     /// @param offsets Array of offsets (ignored in current implementation)
+    /// @return updatedSelf Modified PointEvaluator struct with advanced state
     /// @return maskValues Array of mask values
     function nextInteractionMask(
         PointEvaluator memory self,
         uint256 interaction,
         int256[] memory offsets
-    ) internal pure returns (QM31Field.QM31[] memory maskValues) {
+    ) internal pure returns (PointEvaluator memory updatedSelf, QM31Field.QM31[] memory maskValues) {
         require(interaction < self.mask.length, "Invalid interaction index");
         
         uint256 currentColIndex = self.colIndex[interaction];
@@ -128,17 +128,18 @@ library PointEvaluatorLib {
         self.colIndex[interaction]++;
         self.currentColumn++;
 
-        return maskValues;
+        return (self, maskValues);
     }
 
     /// @notice Add constraint to accumulator
     /// @dev Maps to: fn add_constraint<G>(&mut self, constraint: G) where Self::EF: Mul<G, Output = Self::EF>
     /// @param self The PointEvaluator struct
     /// @param constraint Constraint to add
+    /// @return updatedSelf Modified PointEvaluator struct with updated accumulator
     function addConstraint(
         PointEvaluator memory self,
         QM31Field.QM31 memory constraint
-    ) internal pure {
+    ) internal pure returns (PointEvaluator memory updatedSelf) {
         // Apply denominator inverse: constraint_quotient = constraint * denom_inverse
         QM31Field.QM31 memory quotient = QM31Field.mul(constraint, self.denomInverse);
         
@@ -146,6 +147,8 @@ library PointEvaluatorLib {
         self.evaluationAccumulator = self.evaluationAccumulator.accumulate(quotient);
         
         self.constraintsAdded++;
+        
+        return self;
     }
     // TODO:
     // /// @notice Combine extension field values
@@ -165,33 +168,37 @@ library PointEvaluatorLib {
 
     /// @notice Get next trace mask value
     /// @param self The PointEvaluator struct
+    /// @return updatedSelf Modified PointEvaluator struct with advanced state
     /// @return maskValue Next trace mask value
     function nextTraceMask(PointEvaluator memory self) 
         internal 
         pure 
-        returns (QM31Field.QM31 memory maskValue) 
+        returns (PointEvaluator memory updatedSelf, QM31Field.QM31 memory maskValue) 
     {
         int256[] memory offsets = new int256[](1);
         offsets[0] = 0; // Offset 0 for next trace mask
         
-        QM31Field.QM31[] memory masks = nextInteractionMask(self, ORIGINAL_TRACE_IDX, offsets);
-        return masks[0];
+        QM31Field.QM31[] memory masks;
+        (self, masks) = nextInteractionMask(self, ORIGINAL_TRACE_IDX, offsets);
+        return (self, masks[0]);
     }
 
     /// @notice Get preprocessed column value
     /// @param self The PointEvaluator struct
     /// @param columnId Column identifier (unused in current implementation)
+    /// @return updatedSelf Modified PointEvaluator struct with advanced state
     /// @return columnValue Preprocessed column value
     function getPreprocessedColumn(PointEvaluator memory self, uint256 columnId) 
         internal 
         pure 
-        returns (QM31Field.QM31 memory columnValue)
+        returns (PointEvaluator memory updatedSelf, QM31Field.QM31 memory columnValue)
     {
         int256[] memory offsets = new int256[](1);
         offsets[0] = 0;
         
-        QM31Field.QM31[] memory masks = nextInteractionMask(self, PREPROCESSED_TRACE_IDX, offsets);
-        return masks[0];
+        QM31Field.QM31[] memory masks;
+        (self, masks) = nextInteractionMask(self, PREPROCESSED_TRACE_IDX, offsets);
+        return (self, masks[0]);
     }
 
     // TODO: check if it's correct
@@ -199,33 +206,36 @@ library PointEvaluatorLib {
     /// @param self The PointEvaluator struct
     /// @param relationId Relation identifier
     /// @param entries Relation entries
+    /// @return updatedSelf Modified PointEvaluator struct with accumulated relations
     function addToRelation(
         PointEvaluator memory self,
         uint256 relationId,
         QM31Field.QM31[] memory entries
-    ) internal pure {
+    ) internal pure returns (PointEvaluator memory updatedSelf) {
         // Maps to: fn add_to_relation<R: Relation<Self::EF>>(&mut self, entries: &[R::Entry])
         // For now, we implement a simplified version that treats relation entries
         // as constraints to be accumulated
         for (uint256 i = 0; i < entries.length; i++) {
-            addConstraint(self, entries[i]);
+            self = addConstraint(self, entries[i]);
         }
+        return self;
     }
-    
+
     // TODO: check if it's correct
     /// @notice Add logup constraint
     /// @param self The PointEvaluator struct
     /// @param numerator Logup numerator
     /// @param denominator Logup denominator
+    /// @return updatedSelf Modified PointEvaluator struct with logup constraint
     function addLogupConstraint(
         PointEvaluator memory self,
         QM31Field.QM31 memory numerator, 
         QM31Field.QM31 memory denominator
-    ) internal pure {
+    ) internal pure returns (PointEvaluator memory updatedSelf) {
         // Placeholder for logup constraints
         // In full implementation, this would handle logup fraction accumulation
         QM31Field.QM31 memory logupValue = QM31Field.div(numerator, denominator);
-        addConstraint(self, logupValue);
+        return addConstraint(self, logupValue);
     }
 
     // =============================================================================
