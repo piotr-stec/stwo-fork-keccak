@@ -205,7 +205,7 @@ library KeccakChannelLib {
     /// @return Final hash after sequential updates
     function mixRoot(ChannelState storage state, bytes32 left, bytes32 right) internal returns (bytes32) {
         bytes32 newDigest = keccak256(abi.encodePacked(left, right));
-        // Equivalent to: keccak.update(element1).update(element2).finalize()
+        state.nDraws = 0;
         state.digest = newDigest;
         return newDigest;
     }

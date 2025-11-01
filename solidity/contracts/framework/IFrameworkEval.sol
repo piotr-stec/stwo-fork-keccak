@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "./PointEvaluatorLib.sol";
+import "../core/CirclePoint.sol";
 
 /// @title IFrameworkEval
 /// @notice Interface matching Rust FrameworkEval trait for constraint framework

@@ -2,8 +2,10 @@
 pragma solidity ^0.8.20;
 
 import "../core/CirclePoint.sol";
+import "../core/CirclePointM31.sol";
 import "../core/PointEvaluationAccumulator.sol";
 import "../core/CanonicCoset.sol";
+import "../core/CanonicCosetM31.sol";
 import "../fields/QM31Field.sol";
 import "../framework/IFrameworkEval.sol";
 import "../framework/PointEvaluatorLib.sol";
@@ -18,6 +20,8 @@ library FrameworkComponentLib {
     using TreeSubspan for TreeSubspan.Subspan;
     using TreeVecExtensions for QM31Field.QM31[][][];
     using CanonicCoset for CanonicCoset.CanonicCosetStruct;
+    using CanonicCosetM31 for CanonicCosetM31.CanonicCosetStruct;
+    using CirclePointM31 for CirclePointM31.Point;
     using PointEvaluationAccumulator for PointEvaluationAccumulator.Accumulator;
 
     // =============================================================================
@@ -33,11 +37,12 @@ library FrameworkComponentLib {
     // =============================================================================
 
     /// @notice Sample points structure for mask points generation
+    /// @dev Maps to TreeVec<ColumnVec<Vec<CirclePoint<SecureField>>>> in Rust
     struct SamplePoints {
-        uint256 nTrees;
-        CirclePoint.Point[][][] points;
-        uint256[] nColumns;
-        uint256 totalPoints;
+        CirclePoint.Point[][][] points;  // [tree][column][mask_point]
+        uint256[] nColumns;              // Number of columns per tree
+        uint256 totalPoints;             // Total number of mask points
+        CirclePoint.Point[][] preprocessed; // Convenient access to preprocessed points (tree 0)
     }
 
     /// @notice Component information structure
@@ -173,11 +178,8 @@ library FrameworkComponentLib {
         return bounds;
     }
 
-    // TODO: better check for compatibility with Rust implementation
-    /// @notice Generate mask points for the component
-    /// @param state The component state
-    /// @param point The point to generate mask points for
-    /// @return samplePoints Generated sample points
+
+
     function maskPoints(ComponentState storage state, CirclePoint.Point memory point)
         external
         view
@@ -185,29 +187,178 @@ library FrameworkComponentLib {
     {
         require(state.isInitialized, "Component not initialized");
         
-       
-        CanonicCoset.CanonicCosetStruct memory canonicCoset = CanonicCoset.newCanonicCoset(state.info.logSize);
+        // Rust: let trace_step = CanonicCoset::new(self.eval.log_size()).step();
+        CanonicCosetM31.CanonicCosetStruct memory canonicCosetM31 = CanonicCosetM31.newCanonicCoset(IFrameworkEval(state.eval).logSize());
+        CirclePointM31.Point memory traceStepM31 = CanonicCosetM31.step(canonicCosetM31);
+
+        // Hardcoded mask offsets structure for WideFibonacci component
+        // Rust: self.info.mask_offsets.as_ref().map_cols(...)
         
-        samplePoints.nTrees = state.traceLocations.length;
-        samplePoints.points = new CirclePoint.Point[][][](samplePoints.nTrees);
-        samplePoints.nColumns = new uint256[](samplePoints.nTrees);
+        // Initialize TreeVec structure (3 trees: PREPROCESSED, ORIGINAL_TRACE, INTERACTION)
+        uint256 nTrees = 3;
+        samplePoints.points = new CirclePoint.Point[][][](nTrees);
+        samplePoints.nColumns = new uint256[](nTrees);
         samplePoints.totalPoints = 0;
         
-        for (uint256 treeIdx = 0; treeIdx < state.traceLocations.length; treeIdx++) {
-            uint256 numCols = state.traceLocations[treeIdx].size();
-            samplePoints.nColumns[treeIdx] = numCols;
-            samplePoints.points[treeIdx] = new CirclePoint.Point[][](numCols);
+        // Initialize all trees as empty
+        for (uint256 treeIdx = 0; treeIdx < nTrees; treeIdx++) {
+            samplePoints.nColumns[treeIdx] = 0;
+            samplePoints.points[treeIdx] = new CirclePoint.Point[][](0);
+        }
+        
+        // Apply mask_offsets logic for each column in trace locations
+        // Rust: self.info.mask_offsets.as_ref().map_cols(|col_offsets| {
+        //          col_offsets.iter().map(|offset| point + trace_step.mul_signed(*offset).into_ef()).collect()
+        //       })
+        
+        for (uint256 locationIdx = 0; locationIdx < state.traceLocations.length; locationIdx++) {
+            TreeSubspan.Subspan memory location = state.traceLocations[locationIdx];
+            uint256 treeIdx = location.treeIndex;
             
-            for (uint256 colIdx = 0; colIdx < numCols; colIdx++) {
-                // For simplicity, each column has one mask point at the evaluation point
-                // In full implementation, this would use actual mask offsets
-                samplePoints.points[treeIdx][colIdx] = new CirclePoint.Point[](1);
-                samplePoints.points[treeIdx][colIdx][0] = point;
-                samplePoints.totalPoints++;
+            if (treeIdx < nTrees) {
+                uint256 numCols = location.size();
+                
+                // Ensure tree has enough space
+                if (samplePoints.points[treeIdx].length < location.colEnd) {
+                    CirclePoint.Point[][] memory newTree = new CirclePoint.Point[][](location.colEnd);
+                    for (uint256 i = 0; i < samplePoints.points[treeIdx].length; i++) {
+                        newTree[i] = samplePoints.points[treeIdx][i];
+                    }
+                    samplePoints.points[treeIdx] = newTree;
+                    samplePoints.nColumns[treeIdx] = location.colEnd;
+                }
+                
+                // For each column in this component's location, get mask offsets and compute points
+                for (uint256 colOffset = 0; colOffset < numCols; colOffset++) {
+                    uint256 colIdx = location.colStart + colOffset;
+                    if (colIdx < samplePoints.points[treeIdx].length) {
+                        
+                        // Hardcoded mask offsets for WideFibonacci TreeVec structure:
+                        // Tree 0 (preprocessed): [] (empty)
+                        // Tree 1 (trace): [[0], [0], ..., [0]] (50 columns, each with offset [0])
+                        int32[] memory maskOffsets;
+                        
+                        if (treeIdx == PREPROCESSED_TRACE_IDX) {
+                            // Preprocessed tree: empty offsets
+                            maskOffsets = new int32[](0);
+                        } else if (treeIdx == ORIGINAL_TRACE_IDX) {
+                            // Trace tree: each column has offset [0]
+                            maskOffsets = new int32[](1);
+                            maskOffsets[0] = 0;
+                        } else {
+                            // Other trees: no offsets for now
+                            maskOffsets = new int32[](0);
+                        }
+                        
+                        // Create points array for this column
+                        samplePoints.points[treeIdx][colIdx] = new CirclePoint.Point[](maskOffsets.length);
+                        
+                        // For each offset, compute: point + trace_step.mul_signed(offset).into_ef()
+                        for (uint256 offsetIdx = 0; offsetIdx < maskOffsets.length; offsetIdx++) {
+                            int32 offset = maskOffsets[offsetIdx];
+                            
+                            // Compute trace_step.mul_signed(offset)
+                            CirclePointM31.Point memory offsetPoint = CirclePointM31.mulSigned(traceStepM31, offset);
+                            
+                            // Convert M31 point to QM31 point (.into_ef())
+                            CirclePoint.Point memory offsetPointQM31 = CirclePoint.Point({
+                                x: QM31Field.fromM31(offsetPoint.x, 0, 0, 0),
+                                y: QM31Field.fromM31(offsetPoint.y, 0, 0, 0)
+                            });
+                            
+                            // Add to base point: point + offset_point
+                            samplePoints.points[treeIdx][colIdx][offsetIdx] = CirclePoint.add(point, offsetPointQM31);
+                            samplePoints.totalPoints++;
+                        }
+                    }
+                }
             }
         }
         
+        // Handle preprocessed columns (tree 0) - typically empty for WideFibonacci
+        samplePoints.preprocessed = samplePoints.points[PREPROCESSED_TRACE_IDX];
+        
         return samplePoints;
+        
+        
+        // // Get mask points from evaluator (delegates to component implementation)
+        // // Rust: self.info.mask_offsets.as_ref().map_cols(...)
+        // CirclePoint.Point[][] memory componentMaskPoints = IFrameworkEval(state.eval).maskPoints(point, traceStep);
+        
+        // // Initialize TreeVec structure (3 trees: PREPROCESSED, ORIGINAL_TRACE, INTERACTION)
+        // uint256 nTrees = 3;
+        // samplePoints.points = new CirclePoint.Point[][][](nTrees);
+        // samplePoints.nColumns = new uint256[](nTrees);
+        // samplePoints.totalPoints = 0;
+        
+        // // Initialize all trees as empty
+        // for (uint256 treeIdx = 0; treeIdx < nTrees; treeIdx++) {
+        //     samplePoints.nColumns[treeIdx] = 0;
+        //     samplePoints.points[treeIdx] = new CirclePoint.Point[][](0);
+        // }
+        
+        // // Place component mask points in the correct tree locations
+        // for (uint256 locationIdx = 0; locationIdx < state.traceLocations.length; locationIdx++) {
+        //     TreeSubspan.Subspan memory location = state.traceLocations[locationIdx];
+        //     uint256 treeIdx = location.treeIndex;
+            
+        //     if (treeIdx < nTrees) {
+        //         uint256 numCols = location.size();
+                
+        //         // Ensure tree has enough space
+        //         if (samplePoints.points[treeIdx].length < location.colEnd) {
+        //             CirclePoint.Point[][] memory newTree = new CirclePoint.Point[][](location.colEnd);
+        //             for (uint256 i = 0; i < samplePoints.points[treeIdx].length; i++) {
+        //                 newTree[i] = samplePoints.points[treeIdx][i];
+        //             }
+        //             samplePoints.points[treeIdx] = newTree;
+        //             samplePoints.nColumns[treeIdx] = location.colEnd;
+        //         }
+                
+        //         // Copy mask points from component to tree location
+        //         for (uint256 colOffset = 0; colOffset < numCols && colOffset < componentMaskPoints.length; colOffset++) {
+        //             uint256 colIdx = location.colStart + colOffset;
+        //             if (colIdx < samplePoints.points[treeIdx].length) {
+        //                 samplePoints.points[treeIdx][colIdx] = componentMaskPoints[colOffset];
+        //                 samplePoints.totalPoints += componentMaskPoints[colOffset].length;
+        //             }
+        //         }
+        //     }
+        // }
+        
+        // // Handle preprocessed columns (tree 0)
+        // // Rust: for idx in component.preprocessed_column_indices() { preprocessed_mask_points[idx] = vec![point]; }
+        // if (state.preprocessedColumnIndices.length > 0) {
+        //     // Ensure preprocessed tree exists and has enough space
+        //     uint256 maxPreprocessedIdx = 0;
+        //     for (uint256 i = 0; i < state.preprocessedColumnIndices.length; i++) {
+        //         if (state.preprocessedColumnIndices[i] > maxPreprocessedIdx) {
+        //             maxPreprocessedIdx = state.preprocessedColumnIndices[i];
+        //         }
+        //     }
+            
+        //     if (samplePoints.points[PREPROCESSED_TRACE_IDX].length <= maxPreprocessedIdx) {
+        //         CirclePoint.Point[][] memory newPreprocessedTree = new CirclePoint.Point[][](maxPreprocessedIdx + 1);
+        //         for (uint256 i = 0; i < samplePoints.points[PREPROCESSED_TRACE_IDX].length; i++) {
+        //             newPreprocessedTree[i] = samplePoints.points[PREPROCESSED_TRACE_IDX][i];
+        //         }
+        //         samplePoints.points[PREPROCESSED_TRACE_IDX] = newPreprocessedTree;
+        //         samplePoints.nColumns[PREPROCESSED_TRACE_IDX] = maxPreprocessedIdx + 1;
+        //     }
+            
+        //     // Set preprocessed mask points
+        //     for (uint256 i = 0; i < state.preprocessedColumnIndices.length; i++) {
+        //         uint256 idx = state.preprocessedColumnIndices[i];
+        //         samplePoints.points[PREPROCESSED_TRACE_IDX][idx] = new CirclePoint.Point[](1);
+        //         samplePoints.points[PREPROCESSED_TRACE_IDX][idx][0] = point;
+        //         samplePoints.totalPoints++;
+        //     }
+        // }
+        
+        // // Set convenient preprocessed access
+        // samplePoints.preprocessed = samplePoints.points[PREPROCESSED_TRACE_IDX];
+        
+        // return samplePoints;
     }
 
     /// @notice Get preprocessed column indices

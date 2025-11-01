@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
+import "../fields/M31Field.sol";
 import "../fields/QM31Field.sol";
-import "../libraries/KeccakChannelLib.sol";
+import "./CirclePoint.sol";
 
-/// @title CirclePoint
-/// @notice A point on the complex circle, treated as an additive group
-/// @dev Implements circle group operations for x² + y² = 1
-library CirclePoint {
-    using QM31Field for QM31Field.QM31;
-    using KeccakChannelLib for KeccakChannelLib.ChannelState;
+/// @title CirclePointM31
+/// @notice A point on the complex circle using M31 field, treated as an additive group
+/// @dev Implements circle group operations for x² + y² = 1 using M31 instead of QM31
+library CirclePointM31 {
+    using M31Field for uint32;
 
-    /// @notice Represents a point on the circle with coordinates (x, y)
-    /// @dev Both x and y are elements of the SecureField (QM31)
+    /// @notice Represents a point on the circle with M31 coordinates (x, y)
+    /// @dev Both x and y are elements of the M31 field (uint32)
     struct Point {
-        QM31Field.QM31 x;
-        QM31Field.QM31 y;
+        uint32 x;  // M31 field element
+        uint32 y;  // M31 field element
     }
 
     /// @notice Returns the zero element (identity) of the circle group
-    /// @dev The identity element is (1, 0)
+    /// @dev The identity element is (1, 0) in M31
     /// @return The identity point (1, 0)
     function zero() internal pure returns (Point memory) {
         return Point({
-            x: QM31Field.one(),
-            y: QM31Field.zero()
+            x: M31Field.one(),
+            y: M31Field.zero()
         });
     }
 
@@ -37,11 +37,11 @@ library CirclePoint {
 
     /// @notice Applies the circle's x-coordinate doubling map
     /// @dev For a point (x, y), computes the x-coordinate of 2*(x, y)
-    /// @param x The x-coordinate
+    /// @param x The x-coordinate (M31)
     /// @return The x-coordinate of the doubled point: 2x² - 1
-    function doubleX(QM31Field.QM31 memory x) internal pure returns (QM31Field.QM31 memory) {
-        QM31Field.QM31 memory sx = x.square();
-        return QM31Field.add(QM31Field.add(sx, sx), QM31Field.neg(QM31Field.one()));
+    function doubleX(uint32 x) internal pure returns (uint32) {
+        uint32 sx = M31Field.mul(x, x); // x²
+        return M31Field.sub(M31Field.add(sx, sx), M31Field.one()); // 2x² - 1
     }
 
     /// @notice Adds two circle points
@@ -51,9 +51,9 @@ library CirclePoint {
     /// @return The sum of the two points
     function add(Point memory a, Point memory b) internal pure returns (Point memory) {
         // x = a.x * b.x - a.y * b.y
-        QM31Field.QM31 memory x = QM31Field.sub(QM31Field.mul(a.x, b.x), QM31Field.mul(a.y, b.y));
+        uint32 x = M31Field.sub(M31Field.mul(a.x, b.x), M31Field.mul(a.y, b.y));
         // y = a.x * b.y + a.y * b.x  
-        QM31Field.QM31 memory y = QM31Field.add(QM31Field.mul(a.x, b.y), QM31Field.mul(a.y, b.x));
+        uint32 y = M31Field.add(M31Field.mul(a.x, b.y), M31Field.mul(a.y, b.x));
         
         return Point({x: x, y: y});
     }
@@ -80,7 +80,7 @@ library CirclePoint {
     function conjugate(Point memory point) internal pure returns (Point memory) {
         return Point({
             x: point.x,
-            y: QM31Field.neg(point.y)
+            y: M31Field.neg(point.y)
         });
     }
 
@@ -104,51 +104,42 @@ library CirclePoint {
         return result;
     }
 
-
-    /// @notice Generates a random point on the circle using channel state directly
-    /// @dev Uses Fiat-Shamir transform to generate cryptographically secure random point
-    /// @param channelState The channel state providing randomness
-    /// @return A random point on the circle
-    function getRandomPointFromState(KeccakChannelLib.ChannelState storage channelState) internal returns (Point memory) {
-        // Draw random element t from secure field using library
-        QM31Field.QM31 memory t;
-        t = KeccakChannelLib.drawSecureFelt(channelState);
-        
-        // Compute t²
-        QM31Field.QM31 memory tSquare = QM31Field.square(t);
-        
-        // Compute (1 + t²)⁻¹
-        QM31Field.QM31 memory onePlusTSquaredInv = QM31Field.inverse(QM31Field.add(tSquare, QM31Field.one()));
-        
-        // x = (1 - t²) / (1 + t²)
-        QM31Field.QM31 memory x = QM31Field.mul(QM31Field.sub(QM31Field.one(), tSquare), onePlusTSquaredInv);
-        
-        // y = 2t / (1 + t²)  
-        QM31Field.QM31 memory y = QM31Field.mul(QM31Field.add(t, t), onePlusTSquaredInv);
-        
-        return Point({x: x, y: y});
+    /// @notice Scalar multiplication with signed offset
+    /// @dev Multiplies a point by a signed scalar (for mask point offsets)
+    /// @param point The point to multiply
+    /// @param signedOffset The signed scalar multiplier
+    /// @return The scaled point
+    function mulSigned(Point memory point, int32 signedOffset) internal pure returns (Point memory) {
+        if (signedOffset >= 0) {
+            return mul(point, uint256(uint32(signedOffset)));
+        } else {
+            // Negative offset: multiply by absolute value then negate
+            Point memory result = mul(point, uint256(uint32(-signedOffset)));
+            return neg(result);
+        }
     }
 
     /// @notice Validates that a point lies on the unit circle
-    /// @dev Checks that x² + y² = 1
+    /// @dev Checks that x² + y² = 1 in M31
     /// @param point The point to validate
     /// @return True if the point is on the circle
     function isOnCircle(Point memory point) internal pure returns (bool) {
         // Check x² + y² = 1
-        QM31Field.QM31 memory xSquared = QM31Field.square(point.x);
-        QM31Field.QM31 memory ySquared = QM31Field.square(point.y);
-        QM31Field.QM31 memory sum = QM31Field.add(xSquared, ySquared);
+        uint32 xSquared = M31Field.mul(point.x, point.x);
+        uint32 ySquared = M31Field.mul(point.y, point.y);
+        uint32 sum = M31Field.add(xSquared, ySquared);
         
-        return QM31Field.eq(sum, QM31Field.one());
+        return sum == M31Field.one();
     }
 
-    /// @notice Converts a point to extension field representation  
-    /// @dev Helper for field extension operations
-    /// @param point The point to convert
-    /// @return The point with extended field coordinates
-    function intoEF(Point memory point) internal pure returns (Point memory) {
-        // Already in QM31 (extension field), so just return as-is
-        return point;
+    /// @notice Convert M31 point to QM31 point (extension field)
+    /// @dev Converts CirclePointM31.Point to CirclePoint.Point
+    /// @param m31Point The M31 point to convert
+    /// @return qm31Point The equivalent QM31 point
+    function toQM31(Point memory m31Point) internal pure returns (CirclePoint.Point memory qm31Point) {
+        // Convert M31 coordinates to QM31 (real parts only, imaginary = 0)
+        qm31Point.x = QM31Field.fromM31(m31Point.x, 0, 0, 0);
+        qm31Point.y = QM31Field.fromM31(m31Point.y, 0, 0, 0);
     }
 
     /// @notice Repeated doubling operation
