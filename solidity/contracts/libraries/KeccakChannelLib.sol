@@ -70,20 +70,34 @@ library KeccakChannelLib {
         state.nDraws = 0;
     }
     
-    /// @notice Mix secure field elements using keccak256
-    /// @param state Channel state
-    /// @param felts QM31 elements to mix
+    /// @notice Mix array of QM31 field elements into channel
+    /// @dev Matches Rust implementation exactly:
+    ///      let felts_bytes = felts.iter().flat_map(|qm31| qm31.to_m31_array()).flat_map(|m31| m31.0.to_le_bytes()).collect_vec();
+    ///      hasher.update(self.digest); hasher.update(&felts_bytes); self.update_digest(hasher.finalize())
+    /// @param state Channel state to update
+    /// @param felts Array of QM31 field elements to mix
     function mixFelts(ChannelState storage state, QM31Field.QM31[] memory felts) internal {
-        bytes memory input = abi.encodePacked(state.digest);
+        // Step 1: Convert all felts to bytes (matches felts_bytes collection in Rust)
+        // felts.iter().flat_map(|qm31| qm31.to_m31_array()).flat_map(|m31| m31.0.to_le_bytes())
+        bytes memory feltsBytes = new bytes(felts.length * 16); // Each QM31 = 4×M31 = 4×4 bytes = 16 bytes
+        uint256 byteIndex = 0;
         
-        // Convert QM31 elements to M31 array and encode as little-endian bytes
         for (uint256 i = 0; i < felts.length; i++) {
             uint32[4] memory m31Array = QM31Field.toM31Array(felts[i]);
             for (uint256 j = 0; j < 4; j++) {
-                input = abi.encodePacked(input, _u32ToLittleEndian(m31Array[j]));
+                bytes4 m31Bytes = _u32ToLittleEndian(m31Array[j]);
+                for (uint256 k = 0; k < 4; k++) {
+                    feltsBytes[byteIndex] = m31Bytes[k];
+                    byteIndex++;
+                }
             }
         }
         
+        // Step 2: Hash digest + felts_bytes (matches Rust hasher pattern)
+        // hasher.update(self.digest); hasher.update(&felts_bytes); 
+        bytes memory input = abi.encodePacked(state.digest, feltsBytes);
+        
+        // Step 3: Update digest (matches self.update_digest(hasher.finalize()))
         state.digest = keccak256(input);
         state.nDraws = 0;
     }
@@ -248,12 +262,13 @@ library KeccakChannelLib {
     /// @param value U32 value to convert
     /// @return Little-endian bytes representation
     function _u32ToLittleEndian(uint32 value) private pure returns (bytes4) {
-        return bytes4(
-            bytes1(uint8(value)) |
-            (bytes1(uint8(value >> 8)) << 8) |
-            (bytes1(uint8(value >> 16)) << 16) |
-            (bytes1(uint8(value >> 24)) << 24)
-        );
+        // Convert to little-endian: least significant byte first
+        return bytes4(abi.encodePacked(
+            uint8(value),           // byte 0 (LSB)
+            uint8(value >> 8),      // byte 1
+            uint8(value >> 16),     // byte 2  
+            uint8(value >> 24)      // byte 3 (MSB)
+        ));
     }
     
     /// @notice Convert u64 to little-endian bytes

@@ -13,7 +13,9 @@ import "../../contracts/pcs/PcsConfig.sol";
 import "../../contracts/framework/TreeSubspan.sol";
 import "../../contracts/core/PointEvaluationAccumulator.sol";
 import "../../contracts/core/CirclePoint.sol";
+import "../../contracts/core/CirclePolyDegreeBound.sol";
 import "../../contracts/fields/QM31Field.sol";
+import "../../contracts/pcs/FriVerifier.sol";
 
 /// @title WideFibonacciFlowTest
 /// @notice Test replicating verification flow from Rust with REAL proof.json data
@@ -157,6 +159,9 @@ contract WideFibonacciFlowTest is Test {
     uint32 constant LOG_BLOWUP_FACTOR = 1;
     uint32 constant LOG_LAST_LAYER_DEGREE_BOUND = 0;
     uint32 constant N_QUERIES = 3;
+    
+    // Real proof of work from proof.json
+    uint64 constant REAL_PROOF_OF_WORK = 1615;
 
     // Real sampled_values from proof.json (Fibonacci sequence: 0,1,1,2,3,5,8,13,21,34,55,89,144,233,377,610,987,1597,2584,4181,6765,10946,17711,28657,46368,75025,121393,196418,317811,514229,832040,1346269,2178309,3524578,5702887,9227465,14930352,24157817,39088169,63245986,102334155,165580141,267914296,433494437,701408733,1134903170,1836311903,823731426,512559682,1336291108)
     function getRealFibonacciValues()
@@ -164,7 +169,7 @@ contract WideFibonacciFlowTest is Test {
         pure
         returns (uint32[] memory values)
     {
-        values = new uint32[](51);
+        values = new uint32[](50);
         values[0] = 0;
         values[1] = 1;
         values[2] = 1;
@@ -215,7 +220,7 @@ contract WideFibonacciFlowTest is Test {
         values[47] = 823731426;
         values[48] = 512559682;
         values[49] = 1336291108;
-        values[50] = 0; // Last value for 51 columns
+        // values[50] = 0; // Last value for 51 columns
     }
 
     // Test components
@@ -227,6 +232,7 @@ contract WideFibonacciFlowTest is Test {
     // Storage variables for libraries that modify state
     KeccakChannelLib.ChannelState channel;
     CommitmentSchemeVerifierLib.VerifierState commitmentScheme;
+    FriVerifier.VerifierState friVerifier;
 
     // =============================================================================
     // Setup
@@ -236,11 +242,14 @@ contract WideFibonacciFlowTest is Test {
         uint256 setupStartGas = gasleft();
         console.log("=== setUp() Gas Analysis ===");
         console.log("setUp start gas:", setupStartGas);
-        
+
         // Create WideFibonacci evaluator with exact params from proof.json
         wideFibEval = new WideFibonacciEval(3, 50);
         uint256 afterWideFibGas = gasleft();
-        console.log("Gas for WideFibonacciEval creation:", setupStartGas - afterWideFibGas);
+        console.log(
+            "Gas for WideFibonacciEval creation:",
+            setupStartGas - afterWideFibGas
+        );
 
         // Initialize proof with real config from proof.json
         testProof = ProofLib.createProofWithConfig(
@@ -267,7 +276,7 @@ contract WideFibonacciFlowTest is Test {
             friConfig: friConfig
         });
         CommitmentSchemeVerifierLib.initialize(commitmentScheme, pcsConfig);
-        
+
         uint256 setupEndGas = gasleft();
         uint256 totalSetupGas = setupStartGas - setupEndGas;
         console.log("Total setUp() gas used:", totalSetupGas);
@@ -334,6 +343,8 @@ contract WideFibonacciFlowTest is Test {
             traceSizes,
             channel
         );
+
+
         console.log(
             "Updated channel state after preprocessed trace commitment:"
         );
@@ -392,12 +403,34 @@ contract WideFibonacciFlowTest is Test {
         for (uint256 i = 0; i < 4; i++) {
             compositionSizes[i] = compositionLogDegree; // All 4 components have same log degree
         }
+
         CommitmentSchemeVerifierLib.commit(
             commitmentScheme,
             compositionCommit,
             compositionSizes,
             channel
         );
+
+        uint32[][] memory columnLogSizes2 = commitmentScheme
+            .columnLogSizes
+            .data;
+
+        console.log("Column log sizes in commitment scheme:");
+        for (uint256 treeIdx = 0; treeIdx < columnLogSizes2.length; treeIdx++) {
+            console.log(" Tree", treeIdx, "log sizes:");
+            for (
+                uint256 colIdx = 0;
+                colIdx < columnLogSizes2[treeIdx].length;
+                colIdx++
+            ) {
+                console.log(
+                    "  Column",
+                    colIdx,
+                    "log size:",
+                    columnLogSizes2[treeIdx][colIdx]
+                );
+            }
+        }
 
         console.log("Updated channel state after composition commitment:");
         console.log("  digest:");
@@ -472,13 +505,16 @@ contract WideFibonacciFlowTest is Test {
         );
 
         uint256 beforeMaskPointsGas = gasleft();
-        
+
         FrameworkComponentLib.SamplePoints memory samplePoints = componentState
             .maskPoints(oodsPoint);
 
         uint256 afterMaskPointsGas = gasleft();
-        console.log("Gas for maskPoints():", beforeMaskPointsGas - afterMaskPointsGas);
-        
+        console.log(
+            "Gas for maskPoints():",
+            beforeMaskPointsGas - afterMaskPointsGas
+        );
+
         console.log("Sample points masked for OODS point:");
         console.log("SamplePoints structure:");
         console.log("  totalPoints:", samplePoints.totalPoints);
@@ -589,7 +625,7 @@ contract WideFibonacciFlowTest is Test {
         console.log("Total columns across all trees:", totalColumns);
 
         uint256 beforePrintGas = gasleft();
-        
+
         // Create flattened view and print all points
         // console.log("\nFlattened sample_points_by_column structure:");
         // uint256 columnIndex = 0;
@@ -635,12 +671,12 @@ contract WideFibonacciFlowTest is Test {
         //         columnIndex++;
         //     }
         // }
-        
+
         uint256 afterPrintGas = gasleft();
         console.log("Gas for printing points:", beforePrintGas - afterPrintGas);
 
         uint256 beforeEvalGas = gasleft();
-        
+
         PointEvaluationAccumulator.Accumulator
             memory eval_accumulator = PointEvaluationAccumulator.newAccumulator(
                 randomCoeff
@@ -664,12 +700,249 @@ contract WideFibonacciFlowTest is Test {
         console.log("  finalResult.first.imag:", finalResult.first.imag);
         console.log("  finalResult.second.real:", finalResult.second.real);
         console.log("  finalResult.second.imag:", finalResult.second.imag);
-        
+
         uint256 afterEvalGas = gasleft();
         console.log("Gas for evaluation:", beforeEvalGas - afterEvalGas);
-        
+
         uint256 totalGasUsed = startGas - gasleft();
         console.log("Total gas used in test:", totalGasUsed);
+
+        uint256 beforeBoundsGas = gasleft();
+
+        uint32[][] memory columnLogSizes = commitmentScheme.columnLogSizes.data;
+
+        console.log("Column log sizes in commitment scheme:");
+        for (uint256 treeIdx = 0; treeIdx < columnLogSizes.length; treeIdx++) {
+            console.log(" Tree", treeIdx, "log sizes:");
+            for (
+                uint256 colIdx = 0;
+                colIdx < columnLogSizes[treeIdx].length;
+                colIdx++
+            ) {
+                console.log(
+                    "  Column",
+                    colIdx,
+                    "log size:",
+                    columnLogSizes[treeIdx][colIdx]
+                );
+            }
+        }
+
+        QM31Field.QM31[] memory flattenedSampledValues = _createRealSampledValuesFlattened();
+
+        console.log("=== Flattened Sampled Values ===");
+        console.log("flattenedSampledValues.length:", flattenedSampledValues.length);
+        for (uint256 i = 0; i < flattenedSampledValues.length; i++) {
+            console.log("flattenedSampledValues[", i, "]:");
+            console.log("  first.real:", flattenedSampledValues[i].first.real);
+            console.log("  first.imag:", flattenedSampledValues[i].first.imag);
+            console.log("  second.real:", flattenedSampledValues[i].second.real);
+            console.log("  second.imag:", flattenedSampledValues[i].second.imag);
+        }
+
+        console.log("Channel state before mixing flattened sampled values:");
+        console.logBytes32(channel.digest);
+
+
+        channel.mixFelts(flattenedSampledValues);
+        console.log("Channel state after mixing flattened sampled values:");
+        console.logBytes32(channel.digest);
+
+        // Test 1: Calculate bounds from current commitment scheme state
+        CirclePolyDegreeBound.Bound[] memory bounds = commitmentScheme
+            .calculateBounds();
+
+        uint256 afterBoundsGas = gasleft();
+        console.log(
+            "Gas for calculateBounds():",
+            beforeBoundsGas - afterBoundsGas
+        );
+
+        console.log("Calculated bounds:");
+        console.log("  bounds.length:", bounds.length);
+
+        // Print each bound
+        for (uint256 i = 0; i < bounds.length; i++) {
+            console.log(
+                "  bounds[",
+                i,
+                "].logDegreeBound:",
+                bounds[i].logDegreeBound
+            );
+        }
+        
+        // Initialize FriVerifier with bounds and config
+        console.log("\n=== Initializing FriVerifier ===");
+        uint256 beforeFriInitGas = gasleft();
+        
+        // Calculate expected number of inner layers
+        // Formula: start with max bound - CIRCLE_TO_LINE_FOLD_STEP (1), fold by FOLD_STEP (1) until reaching logLastLayerDegreeBound
+        uint32 maxBound = bounds[0].logDegreeBound; // bounds are sorted in descending order
+        uint32 currentBound = maxBound - 1; // CIRCLE_TO_LINE_FOLD_STEP = 1
+        uint32 logLastLayerDegreeBound = commitmentScheme.config.friConfig.logLastLayerDegreeBound;
+        
+        uint256 expectedInnerLayers = 0;
+        uint32 tempBound = currentBound;
+        while (tempBound > logLastLayerDegreeBound) {
+            expectedInnerLayers++;
+            tempBound -= 1; // FOLD_STEP = 1
+        }
+        
+        console.log("Calculating FRI inner layers:");
+        console.log("  maxBound:", maxBound);
+        console.log("  currentBound after line fold:", currentBound);
+        console.log("  logLastLayerDegreeBound:", logLastLayerDegreeBound);
+        console.log("  expectedInnerLayers:", expectedInnerLayers);
+        
+        // Create real FRI proof with data from proof.json
+        FriVerifier.FriProof memory friProof = getRealFriProof();
+        
+        friVerifier = FriVerifier.commit(
+            channel,
+            commitmentScheme.config.friConfig,
+            friProof,
+            bounds
+        );
+
+        console.log("Channel after commit");
+        console.logBytes32(channel.digest);
+
+        bool pow_result = channel.verifyPowNonce(commitmentScheme.config.powBits, 1615);
+
+        assertEq(pow_result, true, "Proof of work verification failed");
+
+        uint256 afterFriInitGas = gasleft();
+        console.log("Gas for FriVerifier initialization:", beforeFriInitGas - afterFriInitGas);
+        console.log("FriVerifier initialized successfully");
+        console.log("  config.logBlowupFactor:", friVerifier.config.logBlowupFactor);
+        console.log("  config.nQueries:", friVerifier.config.nQueries);
+        console.log("  firstLayer.columnBounds.length:", friVerifier.firstLayer.columnBounds.length);
+    }
+
+    // =============================================================================
+    // Test: Bounds Calculation
+    // =============================================================================
+
+    /// @notice Test bounds calculation matching Rust implementation
+    /// @dev Verifies: column_log_sizes().flatten().sorted().rev().dedup()
+    ///                .map(|log_size| CirclePolyDegreeBound::new(log_size - log_blowup_factor))
+    function test_boundsCalculation() public {
+        console.log("=== Testing Bounds Calculation ===");
+
+        // First, set up commitments like in test_realCommitmentFlow
+        bytes32[] memory realCommitments = getRealCommitments();
+
+        // Preprocessed columns commitment (empty)
+        uint32[] memory preprocessedSizes = new uint32[](0);
+        CommitmentSchemeVerifierLib.commit(
+            commitmentScheme,
+            realCommitments[0],
+            preprocessedSizes,
+            channel
+        );
+
+        // Trace columns commitment (50 columns, all log_size 3)
+        uint32[] memory traceSizes = new uint32[](50);
+        for (uint256 i = 0; i < 50; i++) {
+            traceSizes[i] = 3;
+        }
+        CommitmentSchemeVerifierLib.commit(
+            commitmentScheme,
+            realCommitments[1],
+            traceSizes,
+            channel
+        );
+
+        // Get commitment scheme state from the real test setup
+        uint256 beforeBoundsGas = gasleft();
+
+        // Test 1: Calculate bounds from current commitment scheme state
+        CirclePolyDegreeBound.Bound[] memory bounds = commitmentScheme
+            .calculateBounds();
+
+        uint256 afterBoundsGas = gasleft();
+        console.log(
+            "Gas for calculateBounds():",
+            beforeBoundsGas - afterBoundsGas
+        );
+
+        console.log("Calculated bounds:");
+        console.log("  bounds.length:", bounds.length);
+
+        // Print each bound
+        for (uint256 i = 0; i < bounds.length; i++) {
+            console.log(
+                "  bounds[",
+                i,
+                "].logDegreeBound:",
+                bounds[i].logDegreeBound
+            );
+            console.log(
+                "  bounds[",
+                i,
+                "].degree:",
+                1 << bounds[i].logDegreeBound
+            );
+        }
+
+        // Test 2: Debug intermediate steps
+        console.log("\nDebug intermediate steps:");
+
+        // Get flattened column log sizes
+        uint32[] memory flattened = commitmentScheme
+            .getFlattenedColumnLogSizes();
+        console.log("Flattened column log sizes:");
+        console.log("  flattened.length:", flattened.length);
+        for (uint256 i = 0; i < flattened.length; i++) {
+            console.log("  flattened[", i, "]:", flattened[i]);
+        }
+
+        // Get processed (sorted, reversed, deduplicated) log sizes
+        uint32[] memory processed = commitmentScheme
+            .getProcessedColumnLogSizes();
+        console.log("Processed column log sizes (sorted.rev.dedup):");
+        console.log("  processed.length:", processed.length);
+        for (uint256 i = 0; i < processed.length; i++) {
+            console.log("  processed[", i, "]:", processed[i]);
+        }
+
+        // Test 3: Verify against expected values for WideFibonacci
+        // Expected: Tree 0 (preprocessed): empty, Tree 1 (trace): 50 columns of log_size 3
+        // So flattened should be [3, 3, 3, ..., 3] (50 times)
+        // Sorted: [3, 3, 3, ..., 3], Reversed: [3, 3, 3, ..., 3], Dedup: [3]
+        // Bounds: [CirclePolyDegreeBound::new(3 - 1)] = [CirclePolyDegreeBound::new(2)]
+
+        console.log("\nExpected vs Actual:");
+        console.log(
+            "Expected processed length: 1 (only log_size 3 after dedup)"
+        );
+        console.log("Actual processed length:", processed.length);
+
+        if (processed.length > 0) {
+            console.log("Expected processed[0]: 3");
+            console.log("Actual processed[0]:", processed[0]);
+
+            uint32 expectedLogDegreeBound = 3 - LOG_BLOWUP_FACTOR; // 3 - 1 = 2
+            console.log(
+                "Expected bounds[0].logDegreeBound:",
+                expectedLogDegreeBound
+            );
+            if (bounds.length > 0) {
+                console.log(
+                    "Actual bounds[0].logDegreeBound:",
+                    bounds[0].logDegreeBound
+                );
+                assertEq(
+                    bounds[0].logDegreeBound,
+                    expectedLogDegreeBound,
+                    "Bounds calculation mismatch"
+                );
+            }
+        }
+
+        // Verify non-empty bounds
+        assertGt(bounds.length, 0, "Should have at least one bound");
+        console.log("Bounds calculation test passed");
     }
 
     // =============================================================================
@@ -782,8 +1055,8 @@ contract WideFibonacciFlowTest is Test {
     function test_realProofOfWork() public {
         console.log("=== Testing Real Proof of Work ===");
 
-        // Real proof_of_work value from proof.json
-        uint256 realProofOfWork = 1615;
+        // Get real proof_of_work value from proof.json
+        uint64 realProofOfWork = getRealProofOfWork();
 
         console.log("Real proof_of_work from proof.json:", realProofOfWork);
 
@@ -800,10 +1073,124 @@ contract WideFibonacciFlowTest is Test {
 
         // In real verification, this would be checked against the channel state
         assertTrue(realProofOfWork > 0, "Proof of work should be non-zero");
-        assertTrue(
-            realProofOfWork < (1 << POW_BITS),
-            "Proof of work should be valid for given POW_BITS"
-        );
+        
+        // Note: POW_BITS represents the difficulty (number of leading zeros required),
+        // not a maximum value constraint on the nonce itself.
+        // The real proof_of_work value 1615 is the nonce that satisfies the POW_BITS=10 requirement.
+        console.log("Real proof of work nonce is valid for POW_BITS =", POW_BITS);
+    }
+
+    // =============================================================================
+    // Real Proof Data Functions
+    // =============================================================================
+
+    /// @notice Create real FRI proof from proof.json data
+    /// @dev Converts the exact FRI proof structure from proof.json
+    /// @return friProof Complete FRI proof with real data
+    function getRealFriProof() internal pure returns (FriVerifier.FriProof memory friProof) {
+        // Real first layer data from proof.json
+        QM31Field.QM31[] memory firstLayerWitness = new QM31Field.QM31[](3);
+        firstLayerWitness[0] = QM31Field.fromM31(0, 0, 0, 0);
+        firstLayerWitness[1] = QM31Field.fromM31(0, 0, 0, 0);
+        firstLayerWitness[2] = QM31Field.fromM31(0, 0, 0, 0);
+        
+        // First layer commitment from proof.json
+        uint8[32] memory firstLayerCommitmentBytes = [
+            4, 121, 99, 64, 148, 203, 210, 20, 206, 172, 78, 16, 210, 57, 165, 191,
+            43, 112, 218, 76, 30, 105, 42, 243, 163, 248, 10, 7, 14, 185, 89, 73
+        ];
+        
+        // First layer decommitment - using first hash_witness from fri_proof.first_layer.decommitment
+        bytes32[] memory firstLayerHashWitness = new bytes32[](7);
+        
+        // Hash witness 0
+        uint8[32] memory hw0 = [171, 202, 64, 193, 28, 82, 54, 15, 9, 244, 176, 201, 231, 102, 70, 112, 123, 105, 202, 187, 159, 59, 59, 243, 93, 8, 29, 32, 13, 220, 39, 50];
+        firstLayerHashWitness[0] = _uint8ArrayToBytes32(hw0);
+        
+        // Hash witness 1-3 (same as 0 in proof.json)
+        firstLayerHashWitness[1] = firstLayerHashWitness[0];
+        firstLayerHashWitness[2] = firstLayerHashWitness[0];
+        firstLayerHashWitness[3] = firstLayerHashWitness[0];
+        
+        // Hash witness 4-5
+        uint8[32] memory hw4 = [226, 185, 28, 138, 5, 106, 181, 97, 115, 99, 29, 172, 145, 153, 108, 61, 6, 240, 157, 60, 38, 230, 163, 219, 40, 146, 83, 185, 149, 191, 191, 245];
+        firstLayerHashWitness[4] = _uint8ArrayToBytes32(hw4);
+        firstLayerHashWitness[5] = firstLayerHashWitness[4];
+        
+        // Hash witness 6
+        uint8[32] memory hw6 = [154, 187, 40, 169, 116, 29, 146, 43, 248, 137, 213, 95, 30, 111, 34, 184, 85, 157, 34, 154, 121, 162, 223, 175, 245, 185, 16, 179, 47, 125, 179, 218];
+        firstLayerHashWitness[6] = _uint8ArrayToBytes32(hw6);
+        
+        // Create first layer
+        friProof.firstLayer = FriVerifier.FriLayerProof({
+            friWitness: firstLayerWitness,
+            decommitment: abi.encode(firstLayerHashWitness),
+            commitment: _uint8ArrayToBytes32(firstLayerCommitmentBytes)
+        });
+        
+        // Create 3 inner layers from proof.json
+        friProof.innerLayers = new FriVerifier.FriLayerProof[](3);
+        
+        // Inner layer 0
+        QM31Field.QM31[] memory innerLayer0Witness = new QM31Field.QM31[](2);
+        innerLayer0Witness[0] = QM31Field.fromM31(0, 0, 0, 0);
+        innerLayer0Witness[1] = QM31Field.fromM31(0, 0, 0, 0);
+        
+        uint8[32] memory innerLayer0Commitment = [47, 157, 158, 144, 122, 106, 6, 152, 1, 50, 228, 151, 193, 72, 40, 119, 91, 14, 118, 149, 204, 44, 126, 226, 40, 182, 9, 70, 60, 214, 91, 229];
+        
+        bytes32[] memory innerLayer0HashWitness = new bytes32[](3);
+        uint8[32] memory il0hw0 = [50, 92, 80, 167, 201, 186, 48, 118, 40, 229, 240, 169, 189, 91, 239, 102, 136, 173, 49, 45, 13, 27, 100, 238, 108, 207, 63, 173, 208, 248, 42, 36];
+        innerLayer0HashWitness[0] = _uint8ArrayToBytes32(il0hw0);
+        innerLayer0HashWitness[1] = innerLayer0HashWitness[0];
+        uint8[32] memory il0hw2 = [226, 74, 37, 64, 18, 215, 102, 235, 189, 54, 100, 183, 213, 123, 245, 167, 54, 26, 246, 116, 89, 18, 56, 27, 146, 229, 206, 199, 214, 117, 69, 7];
+        innerLayer0HashWitness[2] = _uint8ArrayToBytes32(il0hw2);
+        
+        friProof.innerLayers[0] = FriVerifier.FriLayerProof({
+            friWitness: innerLayer0Witness,
+            decommitment: abi.encode(innerLayer0HashWitness),
+            commitment: _uint8ArrayToBytes32(innerLayer0Commitment)
+        });
+        
+        // Inner layer 1
+        QM31Field.QM31[] memory innerLayer1Witness = new QM31Field.QM31[](2);
+        innerLayer1Witness[0] = QM31Field.fromM31(0, 0, 0, 0);
+        innerLayer1Witness[1] = QM31Field.fromM31(0, 0, 0, 0);
+        
+        uint8[32] memory innerLayer1Commitment = [226, 74, 37, 64, 18, 215, 102, 235, 189, 54, 100, 183, 213, 123, 245, 167, 54, 26, 246, 116, 89, 18, 56, 27, 146, 229, 206, 199, 214, 117, 69, 7];
+        
+        bytes32[] memory innerLayer1HashWitness = new bytes32[](1);
+        uint8[32] memory il1hw0 = [58, 8, 109, 44, 213, 188, 98, 82, 228, 161, 119, 179, 76, 221, 211, 242, 155, 15, 83, 95, 110, 124, 123, 44, 180, 233, 178, 216, 3, 200, 171, 58];
+        innerLayer1HashWitness[0] = _uint8ArrayToBytes32(il1hw0);
+        
+        friProof.innerLayers[1] = FriVerifier.FriLayerProof({
+            friWitness: innerLayer1Witness,
+            decommitment: abi.encode(innerLayer1HashWitness),
+            commitment: _uint8ArrayToBytes32(innerLayer1Commitment)
+        });
+        
+        // Inner layer 2 (final layer before last_layer_poly)
+        QM31Field.QM31[] memory innerLayer2Witness = new QM31Field.QM31[](0); // Empty witness array
+        
+        uint8[32] memory innerLayer2Commitment = [58, 8, 109, 44, 213, 188, 98, 82, 228, 161, 119, 179, 76, 221, 211, 242, 155, 15, 83, 95, 110, 124, 123, 44, 180, 233, 178, 216, 3, 200, 171, 58];
+        
+        bytes32[] memory innerLayer2HashWitness = new bytes32[](1);
+        innerLayer2HashWitness[0] = _uint8ArrayToBytes32(il0hw0); // Reuse from layer 0
+        
+        friProof.innerLayers[2] = FriVerifier.FriLayerProof({
+            friWitness: innerLayer2Witness,
+            decommitment: abi.encode(innerLayer2HashWitness),
+            commitment: _uint8ArrayToBytes32(innerLayer2Commitment)
+        });
+        
+        // Last layer polynomial - single coefficient [0,0],[0,0] from proof.json
+        friProof.lastLayerPoly = new QM31Field.QM31[](1);
+        friProof.lastLayerPoly[0] = QM31Field.fromM31(0, 0, 0, 0);
+    }
+
+    /// @notice Get real proof of work value from proof.json
+    /// @return Real proof of work nonce
+    function getRealProofOfWork() internal pure returns (uint64) {
+        return REAL_PROOF_OF_WORK;
     }
 
     // =============================================================================
@@ -835,6 +1222,36 @@ contract WideFibonacciFlowTest is Test {
         for (uint256 i = 0; i < 4; i++) {
             sampledValues[2][i] = new QM31Field.QM31[](1);
             sampledValues[2][i][0] = QM31Field.zero();
+        }
+    }
+
+    /// @notice Create real sampled values and return them flattened
+    /// @dev Creates the same structure as _createRealSampledValues but returns flattened array
+    /// @return flattened Flattened array of all sampled values (51 Fibonacci + 4 zeros)
+    function _createRealSampledValuesFlattened()
+        internal
+        pure
+        returns (QM31Field.QM31[] memory flattened)
+    {
+        uint32[] memory fibValues = getRealFibonacciValues();
+        
+        // Calculate total length: 0 (preprocessed) + 51 (trace) + 4 (interaction) = 55
+        uint256 totalLength = fibValues.length + 4;
+        flattened = new QM31Field.QM31[](totalLength);
+        uint256 currentIndex = 0;
+        
+        // Tree 0: Preprocessed (empty) - nothing to add
+        
+        // Tree 1: Trace (51 Fibonacci values)
+        for (uint256 i = 0; i < fibValues.length; i++) {
+            flattened[currentIndex] = QM31Field.fromM31(fibValues[i], 0, 0, 0);
+            currentIndex++;
+        }
+        
+        // Tree 2: Interaction (4 zero values)
+        for (uint256 i = 0; i < 4; i++) {
+            flattened[currentIndex] = QM31Field.zero();
+            currentIndex++;
         }
     }
 

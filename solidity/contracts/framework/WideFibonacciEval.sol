@@ -63,7 +63,6 @@ contract WideFibonacciEval is IFrameworkEval {
 
     /// @inheritdoc IFrameworkEval
     function maxConstraintLogDegreeBound() external view override returns (uint32 maxLogDegreeBound) {
-        // Maps to: self.log_n_rows + 1
         return logNRows + 1;
     }
 

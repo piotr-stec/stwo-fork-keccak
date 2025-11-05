@@ -5,8 +5,10 @@ import "../pcs/TreeVec.sol";
 import "../pcs/PcsConfig.sol";
 import "../vcs/MerkleVerifier.sol";
 import "../core/CirclePoint.sol";
+import "../core/CirclePolyDegreeBound.sol";
 import "../fields/QM31Field.sol";
 import "../channel/IChannel.sol";
+import "../utils/ArrayUtils.sol";
 import "./KeccakChannelLib.sol";
 
 /// @title CommitmentSchemeVerifierLib
@@ -19,6 +21,8 @@ library CommitmentSchemeVerifierLib {
     using MerkleVerifier for MerkleVerifier.Verifier;
     using QM31Field for QM31Field.QM31;
     using CirclePoint for CirclePoint.Point;
+    using CirclePolyDegreeBound for CirclePolyDegreeBound.Bound;
+    using ArrayUtils for TreeVec.Uint32ArrayTreeVec;
     using KeccakChannelLib for KeccakChannelLib.ChannelState;
 
     /// @notice Verifier state containing trees and configuration
@@ -96,18 +100,19 @@ library CommitmentSchemeVerifierLib {
         // Mix commitment root into channel
         channelState.mixRoot(channelState.digest, commitment);
         
-        // Calculate extended log sizes with FRI blowup factor
-        uint32[] memory extendedLogSizes = PcsConfig.getExtendedLogSizes(
-            logSizes,
-            state.config.friConfig
-        );
+        // Store original log sizes (bounds calculation needs original sizes)
+        // Extended sizes are calculated when needed for other operations
         
         // Add to verifier state
         state.treeRoots = state.treeRoots.push(commitment);
+        uint32[] memory extendedLogSizes = new uint32[](logSizes.length);
+        for (uint256 i = 0; i < logSizes.length; i++) {
+            extendedLogSizes[i] = logSizes[i] + state.config.friConfig.logBlowupFactor;
+        }
         state.columnLogSizes = state.columnLogSizes.push(extendedLogSizes);
         state.nTrees++;
         
-        emit CommitmentAdded(state.nTrees - 1, commitment);
+        // emit CommitmentAdded(state.nTrees - 1, commitment);
     }
 
     /// @notice Verify commitment scheme proof
@@ -341,5 +346,75 @@ library CommitmentSchemeVerifierLib {
     /// @return Column log sizes
     function getColumnLogSizes(VerifierState storage state, uint256 index) internal view returns (uint32[] memory) {
         return state.columnLogSizes.get(index);
+    }
+
+    // =============================================================================
+    // Bounds Calculation for FRI Verification
+    // =============================================================================
+
+    /// @notice Calculate degree bounds for FRI verification
+    /// @dev Maps to Rust: self.column_log_sizes().flatten().sorted().rev().dedup()
+    ///                    .map(|log_size| CirclePolyDegreeBound::new(log_size - self.config.fri_config.log_blowup_factor))
+    /// @param state Verifier state containing column log sizes and config
+    /// @return bounds Array of CirclePolyDegreeBound for FRI verification
+    function calculateBounds(VerifierState storage state) 
+        internal 
+        view 
+        returns (CirclePolyDegreeBound.Bound[] memory bounds) 
+    {
+        // Rust: self.column_log_sizes().flatten().into_iter().sorted().rev().dedup()
+        uint32[] memory processedLogSizes = state.columnLogSizes.flattenSortReverseDedup();
+        
+        // Rust: .map(|log_size| CirclePolyDegreeBound::new(log_size - self.config.fri_config.log_blowup_factor))
+        uint32 logBlowupFactor = state.config.friConfig.logBlowupFactor;
+        bounds = new CirclePolyDegreeBound.Bound[](processedLogSizes.length);
+        
+        for (uint256 i = 0; i < processedLogSizes.length; i++) {
+            uint32 adjustedLogSize = processedLogSizes[i] - logBlowupFactor;
+            bounds[i] = CirclePolyDegreeBound.create(adjustedLogSize);
+        }
+    }
+
+    /// @notice Get flattened column log sizes for debugging
+    /// @param state Verifier state
+    /// @return flattened Flattened array of all column log sizes
+    function getFlattenedColumnLogSizes(VerifierState storage state) 
+        internal 
+        view 
+        returns (uint32[] memory flattened) 
+    {
+        return state.columnLogSizes.flatten();
+    }
+
+    /// @notice Get processed column log sizes (sorted, reversed, deduplicated)
+    /// @param state Verifier state  
+    /// @return processed Processed array ready for bounds calculation
+    function getProcessedColumnLogSizes(VerifierState storage state)
+        internal
+        view
+        returns (uint32[] memory processed)
+    {
+        return state.columnLogSizes.flattenSortReverseDedup();
+    }
+
+    /// @notice Calculate bounds with explicit log blowup factor (for testing)
+    /// @param state Verifier state
+    /// @param logBlowupFactor Override log blowup factor
+    /// @return bounds Array of CirclePolyDegreeBound
+    function calculateBoundsWithBlowup(
+        VerifierState storage state, 
+        uint32 logBlowupFactor
+    ) 
+        internal 
+        view 
+        returns (CirclePolyDegreeBound.Bound[] memory bounds) 
+    {
+        uint32[] memory processedLogSizes = state.columnLogSizes.flattenSortReverseDedup();
+        bounds = new CirclePolyDegreeBound.Bound[](processedLogSizes.length);
+        
+        for (uint256 i = 0; i < processedLogSizes.length; i++) {
+            uint32 adjustedLogSize = processedLogSizes[i] - logBlowupFactor;
+            bounds[i] = CirclePolyDegreeBound.create(adjustedLogSize);
+        }
     }
 }
