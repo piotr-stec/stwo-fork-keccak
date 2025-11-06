@@ -20,20 +20,38 @@ library FriVerifier {
     using KeccakChannelLib for KeccakChannelLib.ChannelState;
     using MerkleVerifier for MerkleVerifier.Verifier;
 
+    /// @notice Query structure for FRI decommitment
+    /// @param positions Query positions sorted in ascending order
+    /// @param logDomainSize Size of the domain from which queries were sampled
+    struct Queries {
+        uint256[] positions;
+        uint32 logDomainSize;
+    }
+
+    /// @notice Mapping of log sizes to query positions
+    /// @param logSizes Array of unique log sizes
+    /// @param queryPositions Array of query position arrays, indexed by logSizes
+    struct QueryPositionsByLogSize {
+        uint32[] logSizes;
+        uint256[][] queryPositions;
+    }
+
     /// @notice FRI verifier state for commitment phase
     /// @param config FRI configuration parameters
     /// @param firstLayer First layer verifier state
     /// @param innerLayers Array of inner layer verifier states
     /// @param lastLayerDomainLogSize Log size of last layer domain
     /// @param lastLayerPoly Coefficients of last layer polynomial
-    /// @param queries Query positions for decommitment (set after sampling)
-    struct VerifierState {
+    /// @param queries Generated queries (set after sampling)
+    /// @param queryPositionsByLogSize Query positions organized by log size
+    struct FriVerifierState {
         PcsConfig.FriConfig config;
         FriFirstLayerVerifier firstLayer;
         FriInnerLayerVerifier[] innerLayers;
         uint32 lastLayerDomainLogSize;
         QM31Field.QM31[] lastLayerPoly;
-        uint256[] queries;  // Set when queries are sampled
+        Queries queries;  // Set when queries are sampled
+        QueryPositionsByLogSize queryPositionsByLogSize;
         bool queriesSampled;
     }
 
@@ -109,13 +127,13 @@ library FriVerifier {
     /// @param config FRI configuration parameters
     /// @param proof Complete FRI proof
     /// @param columnBounds Circle polynomial degree bounds in descending order
-    /// @return verifierState Initialized verifier state for decommitment
+    /// @return friVerifierState Initialized verifier state for decommitment
     function commit(
         KeccakChannelLib.ChannelState storage channelState,
         PcsConfig.FriConfig memory config,
         FriProof memory proof,
         CirclePolyDegreeBound.Bound[] memory columnBounds
-    ) internal returns (VerifierState memory verifierState) {
+    ) internal returns (FriVerifierState memory friVerifierState) {
         emit FriCommitmentStarted(proof.innerLayers.length + 1);
 
         // Validate inputs
@@ -200,13 +218,20 @@ library FriVerifier {
         _mixQM31Array(channelState, proof.lastLayerPoly);
 
         // Initialize verifier state
-        verifierState = VerifierState({
+        friVerifierState = FriVerifierState({
             config: config,
             firstLayer: firstLayer,
             innerLayers: innerLayers,
             lastLayerDomainLogSize: layerDomainLogSize,
             lastLayerPoly: proof.lastLayerPoly,
-            queries: new uint256[](0),
+            queries: Queries({
+                positions: new uint256[](0),
+                logDomainSize: 0
+            }),
+            queryPositionsByLogSize: QueryPositionsByLogSize({
+                logSizes: new uint32[](0),
+                queryPositions: new uint256[][](0)
+            }),
             queriesSampled: false
         });
 
@@ -214,35 +239,35 @@ library FriVerifier {
     }
 
     /// @notice Sample query positions for FRI decommitment
-    /// @dev Uses channel randomness to sample query positions
-    /// @param verifierState FRI verifier state
+    /// @dev Matches Rust implementation: generates unique queries and maps them by log size
+    /// @param friVerifierState FRI verifier state
     /// @param channelState Keccak channel for randomness
+    /// @return queryPositionsByLogSize Mapping of log sizes to query positions (equivalent to Rust BTreeMap)
     function sampleQueryPositions(
-        VerifierState storage verifierState,
+        FriVerifierState storage friVerifierState,
         KeccakChannelLib.ChannelState storage channelState
-    ) internal {
+    ) internal returns (QueryPositionsByLogSize memory queryPositionsByLogSize) {
+        // Collect unique column log sizes (equivalent to Rust BTreeSet)
+        uint32[] memory columnLogSizes = _getUniqueColumnLogSizes(friVerifierState);
+        
         // Find maximum column log size
         uint32 maxColumnLogSize = 0;
-        for (uint256 i = 0; i < verifierState.firstLayer.columnCommitmentDomains.length; i++) {
-            uint32 logSize = CircleDomain.logSize(verifierState.firstLayer.columnCommitmentDomains[i]);
-            if (logSize > maxColumnLogSize) {
-                maxColumnLogSize = logSize;
+        for (uint256 i = 0; i < columnLogSizes.length; i++) {
+            if (columnLogSizes[i] > maxColumnLogSize) {
+                maxColumnLogSize = columnLogSizes[i];
             }
         }
-
-        // Sample queries on maximum domain
-        uint256[] memory queries = new uint256[](verifierState.config.nQueries);
-        for (uint256 i = 0; i < verifierState.config.nQueries; i++) {
-            uint32[] memory randomU32s = channelState.drawU32s();
-            queries[i] = randomU32s[0] % (1 << maxColumnLogSize);
-        }
-
-        // Store queries in verifier state
-        verifierState.queries = queries;
-        verifierState.queriesSampled = true;
-
-        // Note: In full implementation, would return query positions mapped by log size
-        // For now, simplified to store in verifier state
+        
+        // Generate queries (equivalent to Queries::generate)
+        Queries memory queries = _generateQueries(channelState, maxColumnLogSize, uint32(friVerifierState.config.nQueries));
+        
+        // Get query positions by log size (equivalent to get_query_positions_by_log_size)
+        queryPositionsByLogSize = _getQueryPositionsByLogSize(queries, columnLogSizes);
+        
+        // Store in verifier state
+        friVerifierState.queries = queries;
+        friVerifierState.queryPositionsByLogSize = queryPositionsByLogSize;
+        friVerifierState.queriesSampled = true;
     }
 
     /// @notice Mix QM31 array into channel
@@ -265,16 +290,16 @@ library FriVerifier {
     }
 
     /// @notice Get maximum column log size from first layer domains
-    /// @param verifierState FRI verifier state
+    /// @param friVerifierState FRI verifier state
     /// @return maxLogSize Maximum log size among all column domains
-    function getMaxColumnLogSize(VerifierState memory verifierState) 
+    function getMaxColumnLogSize(FriVerifierState memory friVerifierState)  
         internal 
         pure 
         returns (uint32 maxLogSize) 
     {
         maxLogSize = 0;
-        for (uint256 i = 0; i < verifierState.firstLayer.columnCommitmentDomains.length; i++) {
-            uint32 logSize = CircleDomain.logSize(verifierState.firstLayer.columnCommitmentDomains[i]);
+        for (uint256 i = 0; i < friVerifierState.firstLayer.columnCommitmentDomains.length; i++) {
+            uint32 logSize = CircleDomain.logSize(friVerifierState.firstLayer.columnCommitmentDomains[i]);
             if (logSize > maxLogSize) {
                 maxLogSize = logSize;
             }
@@ -334,5 +359,206 @@ library FriVerifier {
         returns (uint32 securityBits) 
     {
         return config.logBlowupFactor * uint32(config.nQueries);
+    }
+
+    /// @notice Get unique column log sizes from first layer domains
+    /// @dev Equivalent to Rust BTreeSet collection
+    /// @param friVerifierState FRI verifier state
+    /// @return uniqueLogSizes Array of unique log sizes in ascending order
+    function _getUniqueColumnLogSizes(FriVerifierState storage friVerifierState) 
+        private 
+        view 
+        returns (uint32[] memory uniqueLogSizes) 
+    {
+        uint32[] memory allLogSizes = new uint32[](friVerifierState.firstLayer.columnCommitmentDomains.length);
+        
+        // Collect all log sizes
+        for (uint256 i = 0; i < friVerifierState.firstLayer.columnCommitmentDomains.length; i++) {
+            allLogSizes[i] = CircleDomain.logSize(friVerifierState.firstLayer.columnCommitmentDomains[i]);
+        }
+        
+        // Sort array
+        _sortUint32Array(allLogSizes);
+        
+        // Remove duplicates
+        return _removeDuplicatesUint32(allLogSizes);
+    }
+
+    /// @notice Generate unique query positions (equivalent to Queries::generate)
+    /// @dev Uses BTreeSet-like logic to ensure uniqueness
+    /// @param channelState Channel state for randomness
+    /// @param logDomainSize Log size of domain to sample from
+    /// @param nQueries Number of unique queries to generate
+    /// @return queries Generated queries structure
+    function _generateQueries(
+        KeccakChannelLib.ChannelState storage channelState,
+        uint32 logDomainSize, 
+        uint32 nQueries
+    ) private returns (Queries memory queries) {
+        uint256 maxQuery = (1 << logDomainSize) - 1;
+        uint256[] memory uniqueQueries = new uint256[](nQueries);
+        uint256 queriesFound = 0;
+        
+        // Use simple approach since we expect nQueries << domain size
+        // In practice, duplicates are very rare for reasonable parameters
+        while (queriesFound < nQueries) {
+            uint32[] memory randomWords = channelState.drawU32s();
+            
+            for (uint256 i = 0; i < randomWords.length && queriesFound < nQueries; i++) {
+                uint256 candidateQuery = randomWords[i] & maxQuery;
+                
+                // Check if this query is already present (simple linear search)
+                bool isDuplicate = false;
+                for (uint256 j = 0; j < queriesFound; j++) {
+                    if (uniqueQueries[j] == candidateQuery) {
+                        isDuplicate = true;
+                        break;
+                    }
+                }
+                
+                if (!isDuplicate) {
+                    uniqueQueries[queriesFound] = candidateQuery;
+                    queriesFound++;
+                }
+            }
+        }
+        
+        // Sort the queries (equivalent to BTreeSet ordering)
+        _sortUint256Array(uniqueQueries);
+        
+        queries = Queries({
+            positions: uniqueQueries,
+            logDomainSize: logDomainSize
+        });
+    }
+
+    /// @notice Map query positions by log size (equivalent to get_query_positions_by_log_size)
+    /// @param queries Generated queries  
+    /// @param columnLogSizes Unique column log sizes
+    /// @return queryPositionsByLogSize Mapped query positions
+    function _getQueryPositionsByLogSize(
+        Queries memory queries,
+        uint32[] memory columnLogSizes
+    ) private pure returns (QueryPositionsByLogSize memory queryPositionsByLogSize) {
+        uint256[][] memory queryPositions = new uint256[][](columnLogSizes.length);
+        
+        for (uint256 logSizeIdx = 0; logSizeIdx < columnLogSizes.length; logSizeIdx++) {
+            uint32 logSize = columnLogSizes[logSizeIdx];
+            
+            if (logSize >= queries.logDomainSize) {
+                // Same size or larger domain - use all queries
+                queryPositions[logSizeIdx] = queries.positions;
+            } else {
+                // Smaller domain - map queries down by shifting and remove duplicates
+                uint32 shift = queries.logDomainSize - logSize;
+                uint256[] memory mappedQueries = new uint256[](queries.positions.length);
+                
+                for (uint256 i = 0; i < queries.positions.length; i++) {
+                    mappedQueries[i] = queries.positions[i] >> shift;
+                }
+                
+                // Remove duplicates (queries are already sorted, so we just need to remove consecutive duplicates)
+                queryPositions[logSizeIdx] = _removeDuplicatesUint256(mappedQueries);
+            }
+        }
+        
+        queryPositionsByLogSize = QueryPositionsByLogSize({
+            logSizes: columnLogSizes,
+            queryPositions: queryPositions
+        });
+    }
+
+    /// @notice Sort uint32 array in ascending order (bubble sort)
+    /// @param arr Array to sort in-place
+    function _sortUint32Array(uint32[] memory arr) private pure {
+        for (uint256 i = 0; i < arr.length; i++) {
+            for (uint256 j = 0; j < arr.length - i - 1; j++) {
+                if (arr[j] > arr[j + 1]) {
+                    uint32 temp = arr[j];
+                    arr[j] = arr[j + 1];
+                    arr[j + 1] = temp;
+                }
+            }
+        }
+    }
+
+    /// @notice Sort uint256 array in ascending order (bubble sort)
+    /// @param arr Array to sort in-place  
+    function _sortUint256Array(uint256[] memory arr) private pure {
+        for (uint256 i = 0; i < arr.length; i++) {
+            for (uint256 j = 0; j < arr.length - i - 1; j++) {
+                if (arr[j] > arr[j + 1]) {
+                    uint256 temp = arr[j];
+                    arr[j] = arr[j + 1];
+                    arr[j + 1] = temp;
+                }
+            }
+        }
+    }
+
+    /// @notice Remove consecutive duplicates from sorted uint32 array
+    /// @param sortedArr Sorted array with potential duplicates
+    /// @return deduplicated Array without consecutive duplicates
+    function _removeDuplicatesUint32(uint32[] memory sortedArr) 
+        private 
+        pure 
+        returns (uint32[] memory deduplicated) 
+    {
+        if (sortedArr.length == 0) {
+            return new uint32[](0);
+        }
+        
+        // Count unique elements
+        uint256 uniqueCount = 1;
+        for (uint256 i = 1; i < sortedArr.length; i++) {
+            if (sortedArr[i] != sortedArr[i-1]) {
+                uniqueCount++;
+            }
+        }
+        
+        // Create deduplicated array
+        deduplicated = new uint32[](uniqueCount);
+        deduplicated[0] = sortedArr[0];
+        uint256 currentIndex = 1;
+        
+        for (uint256 i = 1; i < sortedArr.length; i++) {
+            if (sortedArr[i] != sortedArr[i-1]) {
+                deduplicated[currentIndex] = sortedArr[i];
+                currentIndex++;
+            }
+        }
+    }
+
+    /// @notice Remove consecutive duplicates from sorted uint256 array
+    /// @param sortedArr Sorted array with potential duplicates
+    /// @return deduplicated Array without consecutive duplicates
+    function _removeDuplicatesUint256(uint256[] memory sortedArr) 
+        private 
+        pure 
+        returns (uint256[] memory deduplicated) 
+    {
+        if (sortedArr.length == 0) {
+            return new uint256[](0);
+        }
+        
+        // Count unique elements
+        uint256 uniqueCount = 1;
+        for (uint256 i = 1; i < sortedArr.length; i++) {
+            if (sortedArr[i] != sortedArr[i-1]) {
+                uniqueCount++;
+            }
+        }
+        
+        // Create deduplicated array
+        deduplicated = new uint256[](uniqueCount);
+        deduplicated[0] = sortedArr[0];
+        uint256 currentIndex = 1;
+        
+        for (uint256 i = 1; i < sortedArr.length; i++) {
+            if (sortedArr[i] != sortedArr[i-1]) {
+                deduplicated[currentIndex] = sortedArr[i];
+                currentIndex++;
+            }
+        }
     }
 }

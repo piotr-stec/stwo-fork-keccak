@@ -28,6 +28,7 @@ contract WideFibonacciFlowTest is Test {
     using ProofLib for ProofLib.Proof;
     using KeccakChannelLib for KeccakChannelLib.ChannelState;
     using CommitmentSchemeVerifierLib for CommitmentSchemeVerifierLib.VerifierState;
+    using FriVerifier for FriVerifier.FriVerifierState;
     using PcsConfig for PcsConfig.Config;
 
     // =============================================================================
@@ -232,7 +233,7 @@ contract WideFibonacciFlowTest is Test {
     // Storage variables for libraries that modify state
     KeccakChannelLib.ChannelState channel;
     CommitmentSchemeVerifierLib.VerifierState commitmentScheme;
-    FriVerifier.VerifierState friVerifier;
+    FriVerifier.FriVerifierState friVerifier;
 
     // =============================================================================
     // Setup
@@ -811,12 +812,129 @@ contract WideFibonacciFlowTest is Test {
 
         assertEq(pow_result, true, "Proof of work verification failed");
 
+        channel.mixU64(1615); // Proof of work
+
+        console.log("Channel after mixing proof of work nonce");
+        console.logBytes32(channel.digest); 
+
+
+        FriVerifier.QueryPositionsByLogSize memory queryPositions = friVerifier.sampleQueryPositions(channel);
+        
+        console.log("Query positions sampled successfully:");
+        console.log("  Number of log sizes:", queryPositions.logSizes.length);
+        for (uint256 i = 0; i < queryPositions.logSizes.length; i++) {
+            console.log("  LogSize", queryPositions.logSizes[i]);
+            console.log("    has", queryPositions.queryPositions[i].length, "queries");
+            for (uint256 j = 0; j < queryPositions.queryPositions[i].length; j++) {
+                console.log("      Query", j, "position:", queryPositions.queryPositions[i][j]);
+            }
+        }
+
+        // =============================================================================
+        // N Columns Per Log Size (matching Rust: tree.n_columns_per_log_size)
+        // =============================================================================
+        console.log("\n=== N Columns Per Log Size ===");
+        
+        // Get n_columns_per_log_size for each tree (equivalent to Rust BTreeMap<u32, usize>)
+        uint32[][][] memory nColumnsPerLogSizeData = getNColumnsPerLogSize(commitmentScheme);
+        
+        console.log("N columns per log size per tree:");
+        for (uint256 treeIdx = 0; treeIdx < nColumnsPerLogSizeData.length; treeIdx++) {
+            console.log("  Tree", treeIdx, ":");
+            if (nColumnsPerLogSizeData[treeIdx].length == 0) {
+                console.log("    (empty tree)");
+                continue;
+            }
+            
+            for (uint256 i = 0; i < nColumnsPerLogSizeData[treeIdx].length; i++) {
+                if (nColumnsPerLogSizeData[treeIdx][i].length >= 2) {
+                    uint32 logSize = nColumnsPerLogSizeData[treeIdx][i][0];
+                    uint32 nColumns = nColumnsPerLogSizeData[treeIdx][i][1];
+                    console.log("Log size", logSize);
+                    console.log("    has", nColumns, "columns");
+                    // console.log("    LogSize", logSize, "has", nColumns, "columns");
+                }
+            }
+        }
+        
+
+
         uint256 afterFriInitGas = gasleft();
         console.log("Gas for FriVerifier initialization:", beforeFriInitGas - afterFriInitGas);
         console.log("FriVerifier initialized successfully");
         console.log("  config.logBlowupFactor:", friVerifier.config.logBlowupFactor);
         console.log("  config.nQueries:", friVerifier.config.nQueries);
         console.log("  firstLayer.columnBounds.length:", friVerifier.firstLayer.columnBounds.length);
+
+        // =============================================================================
+        // Verify Merkle Decommitments (matching Rust code)
+        // =============================================================================
+        console.log("\n=== Verifying Merkle Decommitments ===");
+        
+        // Get real decommitments and queried values from proof.json
+        bytes[] memory realDecommitments = getRealDecommitments();
+        uint256[][] memory realQueriedValues = getRealQueriedValues();
+        
+        console.log("Real decommitments count:", realDecommitments.length);
+        console.log("Real queried values count:", realQueriedValues.length);
+        
+        // Verify each tree's decommitments
+        // trees.as_ref().zip_eq(proof.decommitments).zip_eq(proof.queried_values.clone())
+        for (uint256 i = 0; i < realDecommitments.length && i < realQueriedValues.length; i++) {
+            console.log("  Tree", i, "decommitment size:", realDecommitments[i].length);
+            console.log("  Tree", i, "queried values count:", realQueriedValues[i].length);
+            
+            // TODO: Call tree.verify(&query_positions_per_log_size, queried_values, decommitment)
+            // This would require implementing MerkleVerifier.verify() function
+        }
+
+        // =============================================================================  
+        // Create Samples (matching Rust: sampled_points.zip_cols(sampled_values))
+        // =============================================================================
+        console.log("\n=== Creating Point Samples ===");
+        
+        // Get real sampled values from proof.json
+        QM31Field.QM31[][] memory realSampledValues = getRealSampledValues();
+        
+        console.log("Sample points trees:", samplePoints.nColumns.length);
+        console.log("Real sampled values trees:", realSampledValues.length);
+        
+        // sampled_points.zip_cols(proof.sampled_values).map_cols(...)
+        uint256 maxTrees = samplePoints.nColumns.length < realSampledValues.length ? 
+                          samplePoints.nColumns.length : realSampledValues.length;
+                          
+        for (uint256 treeIdx = 0; treeIdx < maxTrees; treeIdx++) {
+            if (samplePoints.nColumns[treeIdx] == 0) {
+                console.log("  Tree", treeIdx, "- empty (no columns)");
+                continue;
+            }
+            
+            console.log("  Tree", treeIdx, "- creating samples:");
+            console.log("    Points count:", samplePoints.nColumns[treeIdx]);
+            console.log("    Values count:", realSampledValues[treeIdx].length);
+            
+            // zip(sampled_points, sampled_values).map(|(point, value)| PointSample { point, value })
+            uint256 pointsCount = samplePoints.nColumns[treeIdx];
+            uint256 maxSamples = pointsCount < realSampledValues[treeIdx].length ? 
+                               pointsCount : realSampledValues[treeIdx].length;
+                               
+            for (uint256 i = 0; i < maxSamples && i < 3; i++) { // Limit to first 3 samples for readability
+                console.log("      Sample", i, ":");
+                if (samplePoints.points[treeIdx].length > 0 && samplePoints.points[treeIdx][0].length > i) {
+                    console.log("        point.x.first.real:", samplePoints.points[treeIdx][0][i].x.first.real);
+                    console.log("        point.x.first.imag:", samplePoints.points[treeIdx][0][i].x.first.imag);
+                    console.log("        point.y.first.real:", samplePoints.points[treeIdx][0][i].y.first.real);
+                    console.log("        point.y.first.imag:", samplePoints.points[treeIdx][0][i].y.first.imag);
+
+                }
+                console.log("        value.first.real:", realSampledValues[treeIdx][i].first.real);
+                // Create PointSample { point, value } structure
+            }
+            
+            if (maxSamples > 3) {
+                console.log("      ... (", maxSamples - 3, "more samples)");
+            }
+        }
     }
 
     // =============================================================================
@@ -1191,6 +1309,246 @@ contract WideFibonacciFlowTest is Test {
     /// @return Real proof of work nonce
     function getRealProofOfWork() internal pure returns (uint64) {
         return REAL_PROOF_OF_WORK;
+    }
+
+    /// @notice Get real decommitments from proof.json
+    /// @return Array of decommitment data for each tree
+    function getRealDecommitments() internal pure returns (bytes[] memory) {
+        bytes[] memory decommitments = new bytes[](3);
+        
+        // Tree 0: Empty decommitment from proof.json
+        decommitments[0] = abi.encodePacked(
+            uint8(0), uint8(0) // Empty hash_witness and column_witness arrays
+        );
+        
+        // Tree 1: Full decommitment with hash_witness from proof.json
+        // 5 hash_witness arrays of 32 bytes each + empty column_witness
+        decommitments[1] = abi.encodePacked(
+            // First hash_witness array (32 bytes)
+            uint8(37), uint8(109), uint8(70), uint8(129), uint8(234), uint8(174), uint8(184), uint8(153),
+            uint8(102), uint8(173), uint8(14), uint8(43), uint8(74), uint8(71), uint8(213), uint8(35),
+            uint8(173), uint8(45), uint8(41), uint8(110), uint8(202), uint8(142), uint8(10), uint8(57),
+            uint8(235), uint8(236), uint8(82), uint8(105), uint8(44), uint8(165), uint8(74), uint8(91),
+            // Second hash_witness array (same as first - duplicated in proof.json)
+            uint8(37), uint8(109), uint8(70), uint8(129), uint8(234), uint8(174), uint8(184), uint8(153),
+            uint8(102), uint8(173), uint8(14), uint8(43), uint8(74), uint8(71), uint8(213), uint8(35),
+            uint8(173), uint8(45), uint8(41), uint8(110), uint8(202), uint8(142), uint8(10), uint8(57),
+            uint8(235), uint8(236), uint8(82), uint8(105), uint8(44), uint8(165), uint8(74), uint8(91),
+            // Third hash_witness array (32 bytes)
+            uint8(23), uint8(61), uint8(229), uint8(185), uint8(91), uint8(148), uint8(219), uint8(105),
+            uint8(167), uint8(133), uint8(98), uint8(158), uint8(55), uint8(49), uint8(191), uint8(166),
+            uint8(138), uint8(223), uint8(171), uint8(31), uint8(221), uint8(176), uint8(185), uint8(90),
+            uint8(153), uint8(37), uint8(198), uint8(93), uint8(197), uint8(153), uint8(206), uint8(19),
+            // Fourth hash_witness array (same as third - duplicated)
+            uint8(23), uint8(61), uint8(229), uint8(185), uint8(91), uint8(148), uint8(219), uint8(105),
+            uint8(167), uint8(133), uint8(98), uint8(158), uint8(55), uint8(49), uint8(191), uint8(166),
+            uint8(138), uint8(223), uint8(171), uint8(31), uint8(221), uint8(176), uint8(185), uint8(90),
+            uint8(153), uint8(37), uint8(198), uint8(93), uint8(197), uint8(153), uint8(206), uint8(19),
+            // Fifth hash_witness array (32 bytes)
+            uint8(155), uint8(67), uint8(105), uint8(117), uint8(255), uint8(86), uint8(79), uint8(75),
+            uint8(43), uint8(208), uint8(176), uint8(211), uint8(178), uint8(109), uint8(166), uint8(166),
+            uint8(52), uint8(134), uint8(82), uint8(146), uint8(115), uint8(14), uint8(184), uint8(121),
+            uint8(195), uint8(144), uint8(203), uint8(35), uint8(58), uint8(26), uint8(42), uint8(90),
+            uint8(0) // Empty column_witness
+        );
+        
+        // Tree 2: Full decommitment with hash_witness from proof.json
+        // 6 hash_witness arrays of 32 bytes each + empty column_witness  
+        decommitments[2] = abi.encodePacked(
+            // First hash_witness array (32 bytes)
+            uint8(171), uint8(202), uint8(64), uint8(193), uint8(28), uint8(82), uint8(54), uint8(15),
+            uint8(9), uint8(244), uint8(176), uint8(201), uint8(231), uint8(102), uint8(70), uint8(112),
+            uint8(123), uint8(105), uint8(202), uint8(187), uint8(159), uint8(59), uint8(59), uint8(243),
+            uint8(93), uint8(8), uint8(29), uint8(32), uint8(13), uint8(220), uint8(39), uint8(50),
+            // Second hash_witness array (32 bytes)
+            uint8(50), uint8(92), uint8(80), uint8(167), uint8(201), uint8(186), uint8(48), uint8(118),
+            uint8(40), uint8(229), uint8(240), uint8(169), uint8(189), uint8(91), uint8(239), uint8(102),
+            uint8(136), uint8(173), uint8(49), uint8(45), uint8(13), uint8(27), uint8(100), uint8(238),
+            uint8(108), uint8(207), uint8(63), uint8(173), uint8(208), uint8(248), uint8(42), uint8(36),
+            // Third and fourth are duplicates of second
+            uint8(50), uint8(92), uint8(80), uint8(167), uint8(201), uint8(186), uint8(48), uint8(118),
+            uint8(40), uint8(229), uint8(240), uint8(169), uint8(189), uint8(91), uint8(239), uint8(102),
+            uint8(136), uint8(173), uint8(49), uint8(45), uint8(13), uint8(27), uint8(100), uint8(238),
+            uint8(108), uint8(207), uint8(63), uint8(173), uint8(208), uint8(248), uint8(42), uint8(36),
+            uint8(50), uint8(92), uint8(80), uint8(167), uint8(201), uint8(186), uint8(48), uint8(118),
+            uint8(40), uint8(229), uint8(240), uint8(169), uint8(189), uint8(91), uint8(239), uint8(102),
+            uint8(136), uint8(173), uint8(49), uint8(45), uint8(13), uint8(27), uint8(100), uint8(238),
+            uint8(108), uint8(207), uint8(63), uint8(173), uint8(208), uint8(248), uint8(42), uint8(36),
+            // Fifth hash_witness array (32 bytes)
+            uint8(58), uint8(8), uint8(109), uint8(44), uint8(213), uint8(188), uint8(98), uint8(82),
+            uint8(228), uint8(161), uint8(119), uint8(179), uint8(76), uint8(221), uint8(211), uint8(242),
+            uint8(155), uint8(15), uint8(83), uint8(95), uint8(110), uint8(124), uint8(123), uint8(44),
+            uint8(180), uint8(233), uint8(178), uint8(216), uint8(3), uint8(200), uint8(171), uint8(58),
+            // Sixth hash_witness array (same as fifth - duplicated)
+            uint8(58), uint8(8), uint8(109), uint8(44), uint8(213), uint8(188), uint8(98), uint8(82),
+            uint8(228), uint8(161), uint8(119), uint8(179), uint8(76), uint8(221), uint8(211), uint8(242),
+            uint8(155), uint8(15), uint8(83), uint8(95), uint8(110), uint8(124), uint8(123), uint8(44),
+            uint8(180), uint8(233), uint8(178), uint8(216), uint8(3), uint8(200), uint8(171), uint8(58),
+            // Seventh hash_witness array (32 bytes)
+            uint8(47), uint8(157), uint8(158), uint8(144), uint8(122), uint8(106), uint8(6), uint8(152),
+            uint8(1), uint8(50), uint8(228), uint8(151), uint8(193), uint8(72), uint8(40), uint8(119),
+            uint8(91), uint8(14), uint8(118), uint8(149), uint8(204), uint8(44), uint8(126), uint8(226),
+            uint8(40), uint8(182), uint8(9), uint8(70), uint8(60), uint8(214), uint8(91), uint8(229),
+            uint8(0) // Empty column_witness
+        );
+        
+        return decommitments;
+    }
+
+    /// @notice Get real queried values from proof.json
+    /// @return Array of queried values for each tree
+    function getRealQueriedValues() internal pure returns (uint256[][] memory) {
+        uint256[][] memory queriedValues = new uint256[][](3);
+        
+        // Tree 0: Empty queried values
+        queriedValues[0] = new uint256[](0);
+        
+        // Tree 1: Real Fibonacci values from proof.json "queried_values"
+        uint32[] memory fibValues = getRealFibonacciValues();
+        queriedValues[1] = new uint256[](fibValues.length);
+        for (uint256 i = 0; i < fibValues.length; i++) {
+            queriedValues[1][i] = fibValues[i];
+        }
+        
+        // Tree 2: Zero values from proof.json 
+        queriedValues[2] = new uint256[](12);
+        for (uint256 i = 0; i < 12; i++) {
+            queriedValues[2][i] = 0;
+        }
+        
+        return queriedValues;
+    }
+
+    /// @notice Get real sampled values from proof.json  
+    /// @return Array of sampled values for each tree
+    function getRealSampledValues() internal pure returns (QM31Field.QM31[][] memory) {
+        QM31Field.QM31[][] memory sampledValues = new QM31Field.QM31[][](3);
+        
+        // Tree 0: Empty sampled values
+        sampledValues[0] = new QM31Field.QM31[](0);
+        
+        // Tree 1: Fibonacci values from proof.json "sampled_values"  
+        uint32[] memory fibValues = getRealFibonacciValues();
+        sampledValues[1] = new QM31Field.QM31[](fibValues.length);
+        for (uint256 i = 0; i < fibValues.length; i++) {
+            sampledValues[1][i] = QM31Field.fromM31(fibValues[i], 0, 0, 0);
+        }
+        
+        // Tree 2: Zero values from proof.json
+        sampledValues[2] = new QM31Field.QM31[](4);
+        for (uint256 i = 0; i < 4; i++) {
+            sampledValues[2][i] = QM31Field.zero();
+        }
+        
+        return sampledValues;
+    }
+
+    /// @notice Get n_columns_per_log_size for each tree (matching Rust BTreeMap<u32, usize>)
+    /// @param scheme The commitment scheme state
+    /// @return Array of [logSize, nColumns] pairs for each tree
+    function getNColumnsPerLogSize(CommitmentSchemeVerifierLib.VerifierState memory scheme) 
+        internal 
+        pure 
+        returns (uint32[][][] memory) 
+    {
+        uint32[][][] memory result = new uint32[][][](scheme.columnLogSizes.data.length);
+        
+        for (uint256 treeIdx = 0; treeIdx < scheme.columnLogSizes.data.length; treeIdx++) {
+            uint32[] memory columnLogSizes = scheme.columnLogSizes.data[treeIdx];
+            
+            if (columnLogSizes.length == 0) {
+                result[treeIdx] = new uint32[][](0);
+                continue;
+            }
+            
+            // Count unique log sizes and their occurrences (equivalent to BTreeMap)
+            // First, find unique log sizes
+            uint32[] memory uniqueLogSizes = _getUniqueLogSizes(columnLogSizes);
+            
+            // Create result array for this tree
+            result[treeIdx] = new uint32[][](uniqueLogSizes.length);
+            
+            // For each unique log size, count occurrences
+            for (uint256 i = 0; i < uniqueLogSizes.length; i++) {
+                uint32 logSize = uniqueLogSizes[i];
+                uint32 count = 0;
+                
+                // Count how many columns have this log size
+                for (uint256 j = 0; j < columnLogSizes.length; j++) {
+                    if (columnLogSizes[j] == logSize) {
+                        count++;
+                    }
+                }
+                
+                // Store [logSize, count] pair
+                result[treeIdx][i] = new uint32[](2);
+                result[treeIdx][i][0] = logSize;
+                result[treeIdx][i][1] = count;
+            }
+        }
+        
+        return result;
+    }
+
+    /// @notice Get unique log sizes from array (helper for getNColumnsPerLogSize)
+    /// @param logSizes Array of log sizes (may contain duplicates)
+    /// @return Array of unique log sizes in ascending order
+    function _getUniqueLogSizes(uint32[] memory logSizes) internal pure returns (uint32[] memory) {
+        if (logSizes.length == 0) {
+            return new uint32[](0);
+        }
+        
+        // Sort the array first
+        uint32[] memory sorted = new uint32[](logSizes.length);
+        for (uint256 i = 0; i < logSizes.length; i++) {
+            sorted[i] = logSizes[i];
+        }
+        _sortUint32ArrayHelper(sorted);
+        
+        // Remove duplicates
+        return _removeDuplicatesUint32Helper(sorted);
+    }
+
+    /// @notice Sort uint32 array helper
+    function _sortUint32ArrayHelper(uint32[] memory arr) internal pure {
+        for (uint256 i = 0; i < arr.length; i++) {
+            for (uint256 j = 0; j < arr.length - i - 1; j++) {
+                if (arr[j] > arr[j + 1]) {
+                    uint32 temp = arr[j];
+                    arr[j] = arr[j + 1];
+                    arr[j + 1] = temp;
+                }
+            }
+        }
+    }
+
+    /// @notice Remove consecutive duplicates helper
+    function _removeDuplicatesUint32Helper(uint32[] memory sortedArr) internal pure returns (uint32[] memory) {
+        if (sortedArr.length == 0) {
+            return new uint32[](0);
+        }
+        
+        // Count unique elements
+        uint256 uniqueCount = 1;
+        for (uint256 i = 1; i < sortedArr.length; i++) {
+            if (sortedArr[i] != sortedArr[i-1]) {
+                uniqueCount++;
+            }
+        }
+        
+        // Create deduplicated array
+        uint32[] memory deduplicated = new uint32[](uniqueCount);
+        deduplicated[0] = sortedArr[0];
+        uint256 currentIndex = 1;
+        
+        for (uint256 i = 1; i < sortedArr.length; i++) {
+            if (sortedArr[i] != sortedArr[i-1]) {
+                deduplicated[currentIndex] = sortedArr[i];
+                currentIndex++;
+            }
+        }
+        
+        return deduplicated;
     }
 
     // =============================================================================
