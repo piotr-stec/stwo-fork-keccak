@@ -64,8 +64,8 @@ library MerkleVerifier {
         Query memory query,
         Decommitment memory decommitment
     ) internal pure returns (bool) {
-        // Validate input parameters
-        if (query.positions.length != query.expectedValues.length) {
+        // Validate input parameters - each position should have 4 field values (QM31)
+        if (query.positions.length * 4 != query.expectedValues.length) {
             revert InvalidQuery("Position and value lengths mismatch");
         }
         
@@ -73,12 +73,20 @@ library MerkleVerifier {
             revert InvalidDecommitment("Empty hash witness");
         }
 
-        // Verify each queried position
+        // Verify each queried position (each position has 4 QM31 field values)
         for (uint256 i = 0; i < query.positions.length; i++) {
-            if (!_verifyPosition(
+            // Extract 4 field values for this position
+            uint32[4] memory positionValues = [
+                query.expectedValues[i * 4],
+                query.expectedValues[i * 4 + 1], 
+                query.expectedValues[i * 4 + 2],
+                query.expectedValues[i * 4 + 3]
+            ];
+            
+            if (!_verifyPositionWithValues(
                 verifier,
                 query.positions[i],
-                query.expectedValues[i],
+                positionValues,
                 decommitment,
                 i
             )) {
@@ -89,7 +97,60 @@ library MerkleVerifier {
         return true;
     }
 
-    /// @notice Verify single position in Merkle tree
+    /// @notice Verify single position in Merkle tree with QM31 values
+    /// @param verifier Merkle verifier state
+    /// @param position Position to verify
+    /// @param expectedValues Expected QM31 values (4 field elements) at position
+    /// @param decommitment Decommitment proof
+    /// @return True if position verification succeeds
+    function _verifyPositionWithValues(
+        Verifier memory verifier,
+        uint256 position,
+        uint32[4] memory expectedValues,
+        Decommitment memory decommitment,
+        uint256 /* queryIndex */
+    ) internal pure returns (bool) {
+        // Find column log size for this position
+        uint32 logSize = _getLogSizeForPosition(verifier, position);
+        
+        // Calculate tree height
+        uint32 height = logSize;
+        
+        // Start with leaf hash (hash all 4 QM31 field values)
+        bytes32 currentHash = _hashLeafQM31(expectedValues);
+        
+        // Climb up the tree using witness hashes
+        uint256 currentPos = position;
+        uint256 witnessIndex = 0;
+        
+        for (uint32 level = 0; level < height; level++) {
+            if (witnessIndex >= decommitment.hashWitness.length) {
+                revert InvalidDecommitment("Insufficient hash witness");
+            }
+            
+            bytes32 siblingHash = decommitment.hashWitness[witnessIndex++];
+            
+            // Determine if current node is left or right child
+            if (currentPos % 2 == 0) {
+                // Current is left child
+                currentHash = _hashNode(currentHash, siblingHash);
+            } else {
+                // Current is right child  
+                currentHash = _hashNode(siblingHash, currentHash);
+            }
+            
+            currentPos = currentPos / 2;
+        }
+        
+        // Final hash should match root
+        if (currentHash != verifier.root) {
+            // Debug: Log the mismatch
+            revert MerkleVerificationFailed(verifier.root, currentHash);
+        }
+        return true;
+    }
+
+    /// @notice Verify single position in Merkle tree (legacy single value)
     /// @param verifier Merkle verifier state
     /// @param position Position to verify
     /// @param expectedValue Expected value at position
@@ -149,6 +210,18 @@ library MerkleVerifier {
         // In full implementation, would need column layout mapping
         require(verifier.columnLogSizes.length > 0, "No columns configured");
         return verifier.columnLogSizes[0];
+    }
+
+    /// @notice Hash leaf node with QM31 values (4 field elements)
+    /// @param values QM31 field values [first.real, first.imag, second.real, second.imag]
+    /// @return Hash of leaf
+    function _hashLeafQM31(uint32[4] memory values) internal pure returns (bytes32) {
+        // Use Keccak hash with leaf prefix for domain separation
+        return keccak256(abi.encodePacked(
+            "leaf",
+            bytes16(0), // Padding
+            values[0], values[1], values[2], values[3]
+        ));
     }
 
     /// @notice Hash leaf node (column value)
