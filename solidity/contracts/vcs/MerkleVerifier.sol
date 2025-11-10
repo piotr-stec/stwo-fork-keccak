@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import "../fields/M31Field.sol";
-import "forge-std/console.sol";
 
 /// @title MerkleVerifier
 /// @notice Verifies Merkle tree decommitments for vector commitment schemes
@@ -104,16 +103,6 @@ library MerkleVerifier {
         uint32[] memory queriedValues,
         Decommitment memory decommitment
     ) internal pure {
-        console.log("DEBUG: MerkleVerifier.verify starting:");
-        console.log("  queriesPerLogSize.length:", queriesPerLogSize.length);
-        console.log("  queriedValues.length:", queriedValues.length);
-        console.log("  decommitment.hashWitness.length:", decommitment.hashWitness.length);
-        console.log("  decommitment.columnWitness.length:", decommitment.columnWitness.length);
-        
-        for (uint256 i = 0; i < queriesPerLogSize.length; i++) {
-            console.log("  queriesPerLogSize[%d].logSize: %d", i, queriesPerLogSize[i].logSize);
-            console.log("  queriesPerLogSize[%d].queries.length: %d", i, queriesPerLogSize[i].queries.length);
-        }
         // Find max log size
         uint32 maxLogSize = 0;
         for (uint256 i = 0; i < verifier.columnLogSizes.length; i++) {
@@ -142,9 +131,6 @@ library MerkleVerifier {
             // Get number of columns in this layer
             uint256 nColumnsInLayer = _getColumnsForLogSize(verifier, layerLogSize);
             
-            console.log("Processing layer logSize=%d, nColumns=%d", layerLogSize, nColumnsInLayer);
-            uint256 witnessUsedBefore = iterators.hashWitnessIndex;
-            
             // Process layer and get new layer hashes
             lastLayerHashes = _processLayer(
                 layerLogSize,
@@ -156,50 +142,24 @@ library MerkleVerifier {
                 iterators
             );
             
-            uint256 witnessUsedInLayer = iterators.hashWitnessIndex - witnessUsedBefore;
-            console.log("  Layer produced %d hashes, used %d witness hashes", lastLayerHashes.length, witnessUsedInLayer);
-            if (layerLogSize == 0) {
-                // Log final root calculation details
-                if (lastLayerHashes.length > 0) {
-                    console.log("  Final root hash:");
-                    console.logBytes32(lastLayerHashes[0].hash);
-                }
-            }
-            
             if (layerLogSize == 0) break; // Prevent underflow
         }
 
-        // Check that all witnesses and values have been consumed
-        console.log("DEBUG: Final witness consumption check:");
-        console.log("  hashWitnessIndex:", iterators.hashWitnessIndex);
-        console.log("  hashWitness.length:", decommitment.hashWitness.length);
-        console.log("  columnWitnessIndex:", iterators.columnWitnessIndex);
-        console.log("  columnWitness.length:", decommitment.columnWitness.length);
-        console.log("  queriedValuesIndex:", iterators.queriedValuesIndex);
-        console.log("  queriedValues.length:", queriedValues.length);
-        
+        // Check that all witnesses and values have been consumed (matches Rust)
         if (iterators.hashWitnessIndex < decommitment.hashWitness.length) {
-            console.log("ERROR: Hash witness too long - unused hashes:", decommitment.hashWitness.length - iterators.hashWitnessIndex);
             revert MerkleVerificationError("Witness too long");
         }
         if (iterators.queriedValuesIndex < queriedValues.length) {
-            console.log("ERROR: Too many queried values - unused values:", queriedValues.length - iterators.queriedValuesIndex);
             revert MerkleVerificationError("Too many queried values");
         }
         if (iterators.columnWitnessIndex < decommitment.columnWitness.length) {
-            console.log("ERROR: Column witness too long - unused columns:", decommitment.columnWitness.length - iterators.columnWitnessIndex);
             revert MerkleVerificationError("Witness too long");
         }
 
-        // Verify final root
+        // Verify final root (matches Rust)
         if (lastLayerHashes.length != 1) {
             revert MerkleVerificationError("Expected single root hash");
         }
-        
-        console.log("Computed root (hex):");
-        console.logBytes32(lastLayerHashes[0].hash);
-        console.log("Expected root (hex):");
-        console.logBytes32(verifier.root);
         
         if (lastLayerHashes[0].hash != verifier.root) {
             revert MerkleVerificationError("Root mismatch");
@@ -244,7 +204,6 @@ library MerkleVerifier {
 
         // Reset prevLayerIndex for this layer
         iterators.prevLayerIndex = 0;
-        uint256 layerQueryIndex = 0;
         
         // Temporary storage for this layer's hashes
         LayerHash[] memory tempLayerHashes = new LayerHash[](layerQueries.length + previousLayerHashes.length);
@@ -266,12 +225,6 @@ library MerkleVerifier {
         layerHashes = new LayerHash[](layerHashCount);
         for (uint256 i = 0; i < layerHashCount; i++) {
             layerHashes[i] = tempLayerHashes[i];
-            
-            // Debug layers 2, 1, 0
-            if (layerLogSize <= 2) {
-                console.log("Layer %d hash[%d]: nodeIndex=%d", layerLogSize, i, layerHashes[i].nodeIndex);
-                console.logBytes32(layerHashes[i].hash);
-            }
         }
     }
 
@@ -341,132 +294,6 @@ library MerkleVerifier {
         data[offset + 2] = bytes1(uint8(value >> 16));
         data[offset + 3] = bytes1(uint8(value >> 24));
     }
-
-    /// @notice Verify single position in Merkle tree with QM31 values (DEPRECATED)
-    /// @param verifier Merkle verifier state
-    /// @param position Position to verify
-    /// @param expectedValues Expected QM31 values (4 field elements) at position
-    /// @param decommitment Decommitment proof
-    /// @return True if position verification succeeds
-    function _verifyPositionWithValues(
-        Verifier memory verifier,
-        uint256 position,
-        uint32[4] memory expectedValues,
-        Decommitment memory decommitment,
-        uint256 /* queryIndex */
-    ) internal pure returns (bool) {
-        // Find column log size for this position
-        uint32 logSize = _getLogSizeForPosition(verifier, position);
-        
-        // Calculate tree height
-        uint32 height = logSize;
-        
-        // Start with leaf hash (hash all 4 QM31 field values)
-        bytes32 currentHash = _hashLeafQM31(expectedValues);
-        
-        // Climb up the tree using witness hashes
-        uint256 currentPos = position;
-        uint256 witnessIndex = 0;
-        
-        // for (uint32 level = 0; level < height; level++) {
-        //     if (witnessIndex >= decommitment.hashWitness.length) {
-        //         revert InvalidDecommitment("Insufficient hash witness");
-        //     }
-            
-        //     bytes32 siblingHash = decommitment.hashWitness[witnessIndex++];
-            
-        //     // Determine if current node is left or right child
-        //     if (currentPos % 2 == 0) {
-        //         // Current is left child
-        //         currentHash = _hashNode(currentHash, siblingHash);
-        //     } else {
-        //         // Current is right child  
-        //         currentHash = _hashNode(siblingHash, currentHash);
-        //     }
-            
-        //     currentPos = currentPos / 2;
-        // }
-        
-        // Final hash should match root
-        return currentHash == verifier.root;
-    }
-
-    /// @notice Verify single position in Merkle tree (legacy single value)
-    /// @param verifier Merkle verifier state
-    /// @param position Position to verify
-    /// @param expectedValue Expected value at position
-    /// @param decommitment Decommitment proof
-    /// @return True if position verification succeeds
-    function _verifyPosition(
-        Verifier memory verifier,
-        uint256 position,
-        uint32 expectedValue,
-        Decommitment memory decommitment,
-        uint256 /* queryIndex */
-    ) internal pure returns (bool) {
-        // // Find column log size for this position
-        // uint32 logSize = _getLogSizeForPosition(verifier, position);
-        
-        // // Calculate tree height
-        // uint32 height = logSize;
-        
-        // // Start with leaf hash
-        // bytes32 currentHash = _hashLeaf(expectedValue);
-        
-        // // Climb up the tree using witness hashes
-        // uint256 currentPos = position;
-        // uint256 witnessIndex = 0;
-        
-        // for (uint32 level = 0; level < height; level++) {
-        //     if (witnessIndex >= decommitment.hashWitness.length) {
-        //         revert InvalidDecommitment("Insufficient hash witness");
-        //     }
-            
-        //     bytes32 siblingHash = decommitment.hashWitness[witnessIndex++];
-            
-        //     // Determine if current node is left or right child
-        //     if (currentPos % 2 == 0) {
-        //         // Current is left child
-        //         currentHash = _hashNode(currentHash, siblingHash);
-        //     } else {
-        //         // Current is right child  
-        //         currentHash = _hashNode(siblingHash, currentHash);
-        //     }
-            
-        //     currentPos = currentPos / 2;
-        // }
-        
-        // // Final hash should match root
-        // return currentHash == verifier.root;
-    }
-
-    /// @notice Get log size for given position
-    /// @param verifier Merkle verifier state
-    /// @return Log size for the column containing this position
-    function _getLogSizeForPosition(
-        Verifier memory verifier,
-        uint256 /* position */
-    ) internal pure returns (uint32) {
-        // For now, assume all columns have same log size
-        // In full implementation, would need column layout mapping
-        require(verifier.columnLogSizes.length > 0, "No columns configured");
-        return verifier.columnLogSizes[0];
-    }
-
-    /// @notice Hash leaf node with QM31 values (4 field elements)
-    /// @param values QM31 field values [first.real, first.imag, second.real, second.imag]
-    /// @return Hash of leaf
-    function _hashLeafQM31(uint32[4] memory values) internal pure returns (bytes32) {
-        // Use Keccak hash with 64-byte leaf prefix for domain separation (matches Rust)
-        // LEAF_PREFIX: "leaf" (4 bytes) + 60 zero bytes = 64 bytes total
-        return keccak256(abi.encodePacked(
-            "leaf",
-            bytes32(0), // 32 zero bytes
-            bytes28(0), // 28 zero bytes (total: 4 + 32 + 28 = 64 bytes)
-            values[0], values[1], values[2], values[3]
-        ));
-    }
-
 
     /// @notice Get number of columns for a given log size
     /// @param verifier Merkle verifier state
@@ -596,19 +423,6 @@ library MerkleVerifier {
         if (hasChildren) {
             // Internal node: NODE_PREFIX + left + right + column_values
             nodeHash = _hashNode(leftHash, rightHash, nodeValues);
-            
-            // Debug layer 2, node 0 (has 0 columns, leftHash is witness[4])
-            if (nodeIndex == 0 && nodeValues.length == 0 && 
-                leftHash == bytes32(0xe2b91c8a056ab561736319ac91996c3d06f09d3c26e6a3db289253b995bfbff5)) {
-                console.log("DEBUG Node 0 in layer 2:");
-                console.log("  Left:");
-                console.logBytes32(leftHash);
-                console.log("  Right:");
-                console.logBytes32(rightHash);
-                console.log("  nValues: %d", nodeValues.length);
-                console.log("  Result:");
-                console.logBytes32(nodeHash);
-            }
         } else {
             // Leaf node: LEAF_PREFIX + column_values
             nodeHash = _hashLeaf(nodeValues);
@@ -617,7 +431,7 @@ library MerkleVerifier {
         return (nodeHash, newLayerQueryIndex);
     }
 
-    /// @notice Get node hashes from previous layer or witness
+    /// @notice Get node hashes from previous layer or witness (matches Rust next_if logic)
     function _getNodeHashes(
         uint256 nodeIndex,
         LayerHash[] memory previousLayerHashes,
@@ -632,32 +446,17 @@ library MerkleVerifier {
         bytes32 leftHash;
         bytes32 rightHash;
         
-        if (nodeIndex == 0) { // Debug node 0
-            console.log("DEBUG _getNodeHashes for node 0:");
-            console.log("  Looking for left=%d, right=%d", 2 * nodeIndex, 2 * nodeIndex + 1);
-            console.log("  previousLayerHashes.length=%d", previousLayerHashes.length);
-            console.log("  iterators.prevLayerIndex=%d", iterators.prevLayerIndex);
-            if (iterators.prevLayerIndex < previousLayerHashes.length) {
-                console.log("  prev[%d].nodeIndex=%d", iterators.prevLayerIndex, previousLayerHashes[iterators.prevLayerIndex].nodeIndex);
-            }
-        }
-        
         // Try to get left child from previous layer (matches Rust next_if)
         if (iterators.prevLayerIndex < previousLayerHashes.length && 
             previousLayerHashes[iterators.prevLayerIndex].nodeIndex == 2 * nodeIndex) {
             leftHash = previousLayerHashes[iterators.prevLayerIndex].hash;
             iterators.prevLayerIndex++;
-            if (nodeIndex == 0) {
-                console.log("  Found left child in previousLayerHashes");
-            }
         } else {
             // Left child not in previous layer, get from witness
             if (iterators.hashWitnessIndex >= decommitment.hashWitness.length) {
                 revert MerkleVerificationError("Witness too short");
             }
             leftHash = decommitment.hashWitness[iterators.hashWitnessIndex++];
-            console.log("  Used witness[%d] for left child of node %d", iterators.hashWitnessIndex - 1, nodeIndex);
-            console.logBytes32(leftHash);
         }
 
         // Try to get right child from previous layer (matches Rust next_if)
@@ -665,23 +464,18 @@ library MerkleVerifier {
             previousLayerHashes[iterators.prevLayerIndex].nodeIndex == 2 * nodeIndex + 1) {
             rightHash = previousLayerHashes[iterators.prevLayerIndex].hash;
             iterators.prevLayerIndex++;
-            if (nodeIndex == 0) {
-                console.log("  Found right child in previousLayerHashes");
-            }
         } else {
             // Right child not in previous layer, get from witness
             if (iterators.hashWitnessIndex >= decommitment.hashWitness.length) {
                 revert MerkleVerificationError("Witness too short");
             }
             rightHash = decommitment.hashWitness[iterators.hashWitnessIndex++];
-            console.log("  Used witness[%d] for right child of node %d", iterators.hashWitnessIndex - 1, nodeIndex);
-            console.logBytes32(rightHash);
         }
 
         return (leftHash, rightHash);
     }
 
-    /// @notice Get node values from queries or witness
+    /// @notice Get node values from queries or witness (matches Rust logic)
     function _getNodeValues(
         bool isQueriedNode,
         uint256 nColumnsInLayer,
@@ -695,9 +489,6 @@ library MerkleVerifier {
             // Read from queried_values
             for (uint256 i = 0; i < nColumnsInLayer; i++) {
                 if (iterators.queriedValuesIndex >= queriedValues.length) {
-                    console.log("ERROR: Trying to read index %d from %d values", iterators.queriedValuesIndex, queriedValues.length);
-                    console.log("nColumnsInLayer: %d", nColumnsInLayer);
-                    console.log("isQueriedNode: %s", isQueriedNode ? "true" : "false");
                     revert MerkleVerificationError("Too few queried values");
                 }
                 nodeValues[i] = queriedValues[iterators.queriedValuesIndex++];
@@ -716,10 +507,22 @@ library MerkleVerifier {
     }
 
     // =============================================================================
-    // BACKWARD COMPATIBILITY FUNCTIONS (for FriVerifier)
+    // BACKWARD COMPATIBILITY
     // =============================================================================
 
+    /// @notice Create verifier (alias for newVerifier)
+    /// @param root Merkle tree root
+    /// @param columnLogSizes Log sizes for columns
+    /// @return verifier New verifier instance
+    function create(
+        bytes32 root,
+        uint32[] memory columnLogSizes
+    ) internal pure returns (Verifier memory verifier) {
+        return newVerifier(root, columnLogSizes);
+    }
+
     /// @notice Verify single position with M31 values array (for FriVerifier compatibility)
+    /// @dev Simple Merkle path verification for a single leaf
     /// @param verifier Merkle verifier state
     /// @param position Position to verify
     /// @param expectedValues Expected M31 values array at position
@@ -732,7 +535,6 @@ library MerkleVerifier {
         Decommitment memory decommitment,
         uint256 /* queryIndex */
     ) internal pure returns (bool) {
-        // Full implementation: climb the Merkle tree using witness hashes
         uint32 logSize = 0;
         for (uint256 i = 0; i < verifier.columnLogSizes.length; i++) {
             if (verifier.columnLogSizes[i] > logSize) {
@@ -773,16 +575,5 @@ library MerkleVerifier {
         
         // Final hash should match root
         return currentHash == verifier.root;
-    }
-
-    /// @notice Create verifier for backward compatibility
-    /// @param root Merkle tree root
-    /// @param columnLogSizes Log sizes for columns
-    /// @return verifier New verifier instance
-    function create(
-        bytes32 root,
-        uint32[] memory columnLogSizes
-    ) internal pure returns (Verifier memory verifier) {
-        return newVerifier(root, columnLogSizes);
     }
 }
