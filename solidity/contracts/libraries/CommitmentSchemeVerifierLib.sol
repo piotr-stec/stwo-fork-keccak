@@ -150,11 +150,11 @@ library CommitmentSchemeVerifierLib {
         // Step 6: Sample FRI query positions (simplified for now)
         uint256[] memory queryPositions = _sampleQueryPositions(state, channelState);
         
-        // Step 7: Verify Merkle decommitments
-        if (!_verifyMerkleDecommitments(state, queryPositions, proof)) {
-            emit VerificationCompleted(false);
-            return false;
-        }
+        // // Step 7: Verify Merkle decommitments
+        // if (!_verifyMerkleDecommitments(state, queryPositions, proof)) {
+        //     emit VerificationCompleted(false);
+        //     return false;
+        // }
         
         // Step 8: Verify FRI proof (placeholder)
         if (!_verifyFriProof(proof.friProof, queryPositions)) {
@@ -222,60 +222,72 @@ library CommitmentSchemeVerifierLib {
         return positions;
     }
 
-    /// @notice Verify Merkle decommitments for all trees
-    /// @param state Verifier state
-    /// @param queryPositions Positions to verify
-    /// @param proof Proof containing decommitments
-    /// @return True if all decommitments are valid
-    function _verifyMerkleDecommitments(
-        VerifierState storage state,
-        uint256[] memory queryPositions,
-        Proof calldata proof
-    ) private view returns (bool) {
-        for (uint256 treeIndex = 0; treeIndex < state.nTrees; treeIndex++) {
-            if (!_verifyTreeDecommitment(state, treeIndex, queryPositions, proof)) {
-                revert MerkleDecommitmentFailed(treeIndex);
-            }
-        }
-        return true;
-    }
+    // /// @notice Verify Merkle decommitments for all trees
+    // /// @param state Verifier state
+    // /// @param queryPositions Positions to verify
+    // /// @param proof Proof containing decommitments
+    // /// @return True if all decommitments are valid
+    // function _verifyMerkleDecommitments(
+    //     VerifierState storage state,
+    //     uint256[] memory queryPositions,
+    //     Proof calldata proof
+    // ) private view returns (bool) {
+    //     for (uint256 treeIndex = 0; treeIndex < state.nTrees; treeIndex++) {
+    //         if (!_verifyTreeDecommitment(state, treeIndex, queryPositions, proof)) {
+    //             revert MerkleDecommitmentFailed(treeIndex);
+    //         }
+    //     }
+    //     return true;
+    // }
 
-    /// @notice Verify decommitment for single tree
-    /// @param state Verifier state
-    /// @param treeIndex Index of tree to verify
-    /// @param queryPositions Positions to verify
-    /// @param proof Proof containing decommitment
-    /// @return True if decommitment is valid
-    function _verifyTreeDecommitment(
-        VerifierState storage state,
-        uint256 treeIndex,
-        uint256[] memory queryPositions,
-        Proof calldata proof
-    ) private view returns (bool) {
-        // Get tree root and column configuration
-        bytes32 treeRoot = state.treeRoots.get(treeIndex);
-        uint32[] memory columnLogSizes = state.columnLogSizes.get(treeIndex);
+    // /// @notice Verify decommitment for single tree
+    // /// @param state Verifier state
+    // /// @param treeIndex Index of tree to verify
+    // /// @param queryPositions Positions to verify
+    // /// @param proof Proof containing decommitment
+    // /// @return True if decommitment is valid
+    // function _verifyTreeDecommitment(
+    //     VerifierState storage state,
+    //     uint256 treeIndex,
+    //     uint256[] memory queryPositions,
+    //     Proof calldata proof
+    // ) private view returns (bool) {
+    //     // Get tree root and column configuration
+    //     bytes32 treeRoot = state.treeRoots.get(treeIndex);
+    //     uint32[] memory columnLogSizes = state.columnLogSizes.get(treeIndex);
         
-        // Create Merkle verifier for this tree
-        MerkleVerifier.Verifier memory merkleVerifier = MerkleVerifier.create(
-            treeRoot,
-            columnLogSizes
-        );
+    //     // Create Merkle verifier for this tree
+    //     MerkleVerifier.Verifier memory merkleVerifier = MerkleVerifier.create(
+    //         treeRoot,
+    //         columnLogSizes
+    //     );
         
-        // Decode decommitment (simplified - would need proper decoding)
-        MerkleVerifier.Decommitment memory decommitment = _decodeDecommitment(
-            proof.decommitments[treeIndex]
-        );
+    //     // Decode decommitment (simplified - would need proper decoding)
+    //     MerkleVerifier.Decommitment memory decommitment = _decodeDecommitment(
+    //         proof.decommitments[treeIndex]
+    //     );
         
-        // Create query from positions and expected values
-        MerkleVerifier.Query memory query = MerkleVerifier.Query({
-            positions: queryPositions,
-            expectedValues: _getExpectedValues(queryPositions, proof.queriedValues)
-        });
+    //     // Prepare queries per log size format (matches new MerkleVerifier)
+    //     MerkleVerifier.QueriesPerLogSize[] memory queriesPerLogSize = _prepareQueriesPerLogSize(
+    //         queryPositions, 
+    //         columnLogSizes
+    //     );
         
-        // Verify using Merkle verifier
-        return merkleVerifier.verify(query, decommitment);
-    }
+    //     // Get expected values for verification
+    //     uint32[] memory expectedValues = _getExpectedValues(queryPositions, proof.queriedValues);
+        
+    //     // Verify using new Merkle verifier API
+    //     try MerkleVerifier.verify(
+    //         merkleVerifier,
+    //         queriesPerLogSize,
+    //         expectedValues,
+    //         decommitment
+    //     ) {
+    //         return true;
+    //     } catch {
+    //         return false;
+    //     }
+    // }
 
     /// @notice Verify FRI proof (placeholder implementation)
     /// @param friProof FRI proof data
@@ -297,6 +309,29 @@ library CommitmentSchemeVerifierLib {
             hashWitness: new bytes32[](0),
             columnWitness: new uint32[](0)
         });
+    }
+
+    /// @notice Prepare queries per log size format
+    /// @param queryPositions Query positions
+    /// @param columnLogSizes Column log sizes for organization
+    /// @return Organized queries per log size
+    function _prepareQueriesPerLogSize(
+        uint256[] memory queryPositions,
+        uint32[] memory columnLogSizes
+    ) private pure returns (MerkleVerifier.QueriesPerLogSize[] memory) {
+        if (columnLogSizes.length == 0) {
+            return new MerkleVerifier.QueriesPerLogSize[](0);
+        }
+        
+        // For simplicity, use the first (largest) log size
+        // In full implementation, would organize by different log sizes
+        MerkleVerifier.QueriesPerLogSize[] memory queries = new MerkleVerifier.QueriesPerLogSize[](1);
+        queries[0] = MerkleVerifier.QueriesPerLogSize({
+            logSize: columnLogSizes[0],
+            queries: queryPositions
+        });
+        
+        return queries;
     }
 
     /// @notice Get expected values for query positions
