@@ -54,14 +54,18 @@ library CanonicCosetM31 {
     }
 
     /// @notice Get half-sized canonical coset
+    /// @dev Rust: Coset::half_odds(self.log_size() - 1)
     /// @param canonicCoset Canonical coset to halve
-    /// @return halfCoset Half-sized canonical coset
+    /// @return halfCosetResult Half-sized coset (G_4n + <G_n>)
     function halfCoset(CanonicCosetStruct memory canonicCoset) 
         internal 
         pure 
-        returns (CosetM31.CosetStruct memory halfCoset) 
+        returns (CosetM31.CosetStruct memory halfCosetResult) 
     {
-        halfCoset = CosetM31.halfCoset(canonicCoset.coset);
+        // Rust: Coset::half_odds(self.log_size() - 1)
+        uint32 logSize = canonicCoset.coset.logSize;
+        require(logSize > 0, "Cannot halve coset of size 1");
+        halfCosetResult = CosetM31.halfOdds(logSize - 1);
     }
 
     /// @notice Get log size of canonical coset

@@ -413,4 +413,27 @@ library CosetM31 {
         halfCosetResult.initialIndex = coset.initialIndex;
         halfCosetResult.stepSize = addIndices(coset.stepSize, coset.stepSize); // Double step index
     }
+
+    /// @notice Double all points in coset (Rust: Coset::double)
+    /// @dev Returns new coset with all points doubled
+    /// @param coset Original coset
+    /// @return doubled Coset with doubled points
+    function double(CosetStruct memory coset) internal pure returns (CosetStruct memory doubled) {
+        require(coset.logSize > 0, "Cannot double coset of size 1");
+        
+        // Rust: initial_index: self.initial_index * 2
+        doubled.initialIndex = mulIndex(coset.initialIndex, 2);
+        
+        // Rust: initial: self.initial.double()
+        doubled.initial = CirclePointM31.double(coset.initial);
+        
+        // Rust: step: self.step.double()
+        doubled.step = CirclePointM31.double(coset.step);
+        
+        // Rust: step_size: self.step_size * 2
+        doubled.stepSize = mulIndex(coset.stepSize, 2);
+        
+        // Rust: log_size: self.log_size.saturating_sub(1)
+        doubled.logSize = coset.logSize - 1;
+    }
 }
