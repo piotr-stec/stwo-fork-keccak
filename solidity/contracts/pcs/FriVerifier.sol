@@ -1058,39 +1058,101 @@ library FriVerifier {
             revert("FIRST LAYER COLUMN COUNT MISMATCH");
         }
 
-        // FIXED: Use the original query evaluations structure as-is
-        // The real issue is that we can't artificially pad - we need to match the exact proof structure
-        // Debug shows: 6 total queries (3 for each log size), so 6 QM31 values = 24 M31 values
-        // We have 5 QM31 values (3+2), but need to organize them correctly for the 6 query positions
-        
+        // Maximum column log size for validation
+        uint32 maxColumnLogSize = CircleDomain.logSize(firstLayer.columnCommitmentDomains[0]);
+        require(queries.logDomainSize == maxColumnLogSize, "Queries sampled on wrong domain");
+
+        // Initialize witness iterator
+        WitnessIterator memory witnessIter = WitnessIterator({
+            witness: firstLayer.proof.friWitness,
+            index: 0
+        });
+
+        // Track decommitment positions by log size (like Rust BTreeMap)
+        // Use simple arrays since we have bounded sizes
+        uint32[] memory uniqueLogSizes = new uint32[](firstLayer.columnCommitmentDomains.length);
+        uint256[][] memory decommitmentsByLogSize = new uint256[][](firstLayer.columnCommitmentDomains.length);
+        uint256 numUniqueLogSizes = 0;
+
+        // Track sparse evaluations and decommitted values
         sparseEvals = new QM31Field.QM31[][](firstLayer.columnBounds.length);
-        
-        // Use the original structure as-is - the deduplication fixed the query positions
-        // Now we should have exactly 5 queries total (3 + 2 after deduplication)
-        // So we need exactly 5 QM31 values = 20 M31 values
-        for (uint256 i = 0; i < firstLayer.columnBounds.length; i++) {
-            sparseEvals[i] = new QM31Field.QM31[](firstLayerQueryEvals[i].length);
-            for (uint256 j = 0; j < firstLayerQueryEvals[i].length; j++) {
-                sparseEvals[i][j] = firstLayerQueryEvals[i][j];
+        uint256 totalDecommittedM31Values = 0;
+
+        // Process each column
+        for (uint256 colIdx = 0; colIdx < firstLayer.columnCommitmentDomains.length; colIdx++) {
+            CircleDomain.CircleDomainStruct memory columnDomain = firstLayer.columnCommitmentDomains[colIdx];
+            QM31Field.QM31[] memory columnQueryEvals = firstLayerQueryEvals[colIdx];
+            uint32 columnLogSize = CircleDomain.logSize(columnDomain);
+
+            // Fold queries to column domain size (matches Rust: queries.fold(queries.log_domain_size - column_domain.log_size()))
+            uint32 foldSteps = queries.logDomainSize - columnLogSize;
+            Queries memory columnQueries = foldQueries(queries, foldSteps);
+
+            // Debug: Print columnQueries and columnQueryEvals
+            console.log("\n=== Column %d: columnQueries and columnQueryEvals ===", colIdx);
+            console.log("columnLogSize:", columnLogSize);
+            console.log("foldSteps:", foldSteps);
+            console.log("columnQueries.logDomainSize:", columnQueries.logDomainSize);
+            console.log("columnQueries.positions.length:", columnQueries.positions.length);
+            for (uint256 i = 0; i < columnQueries.positions.length; i++) {
+                console.log("  columnQueries.positions[%d]:", i, columnQueries.positions[i]);
+            }
+            console.log("columnQueryEvals.length:", columnQueryEvals.length);
+            for (uint256 i = 0; i < columnQueryEvals.length; i++) {
+                console.log("  columnQueryEvals[%d]:", i);
+                console.log(columnQueryEvals[i].first.real);
+                console.log(columnQueryEvals[i].first.imag);
+                console.log(columnQueryEvals[i].second.real);
+                console.log(columnQueryEvals[i].second.imag);
+   
+            }
+            console.log("=== END Column %d ===\n", colIdx);
+
+            // Compute decommitment positions and rebuild evals
+            (uint256[] memory columnDecommitmentPositions, SparseEvaluation memory sparseEval) =
+                computeDecommitmentPositionsAndRebuildEvals(
+                    columnQueries,
+                    columnQueryEvals,
+                    witnessIter,
+                    CIRCLE_TO_LINE_FOLD_STEP
+                );
+
+            // Store decommitment positions for this log size (columns of same size share positions)
+            bool logSizeFound = false;
+            for (uint256 i = 0; i < numUniqueLogSizes; i++) {
+                if (uniqueLogSizes[i] == columnLogSize) {
+                    logSizeFound = true;
+                    break;
+                }
+            }
+            if (!logSizeFound) {
+                uniqueLogSizes[numUniqueLogSizes] = columnLogSize;
+                decommitmentsByLogSize[numUniqueLogSizes] = columnDecommitmentPositions;
+                numUniqueLogSizes++;
+            }
+
+            // Flatten sparse eval for this column
+            sparseEvals[colIdx] = _flattenSparseEval(sparseEval);
+            totalDecommittedM31Values += _countM31Values(sparseEval);
+        }
+
+        // Check all witness values consumed
+        require(witnessIter.index == witnessIter.witness.length, "Not all witness consumed");
+
+        // Extract decommitted M31 values (matches Rust: decommitmented_values.extend(sparse_evaluation.subset_evals.iter().flatten().flat_map(|qm31| qm31.to_m31_array())))
+        uint32[] memory decommittedValues = new uint32[](totalDecommittedM31Values);
+        uint256 valueIdx = 0;
+        for (uint256 colIdx = 0; colIdx < sparseEvals.length; colIdx++) {
+            for (uint256 i = 0; i < sparseEvals[colIdx].length; i++) {
+                QM31Field.QM31 memory qm31 = sparseEvals[colIdx][i];
+                decommittedValues[valueIdx++] = qm31.first.real;
+                decommittedValues[valueIdx++] = qm31.first.imag;
+                decommittedValues[valueIdx++] = qm31.second.real;
+                decommittedValues[valueIdx++] = qm31.second.imag;
             }
         }
 
-        // === CRITICAL: Extract decommitted_values exactly like Rust ===
-        // Rust: decommitmented_values.extend(sparse_evaluation.subset_evals.iter().flatten().flat_map(|qm31| qm31.to_m31_array()));
-        uint32[] memory decommittedValues = _extractDecommittedValues(sparseEvals);
-        console.log("DEBUG: sparseEvals.length:", sparseEvals.length);
-        for (uint256 i = 0; i < sparseEvals.length; i++) {
-            console.log("sparseEvals[%d].length: %d", i, sparseEvals[i].length);
-            for (uint256 j = 0; j < sparseEvals[i].length; j++) {
-                console.log("Real", sparseEvals[i][j].first.real);
-                console.log("Imag", sparseEvals[i][j].first.imag);
-                console.log("Real2", sparseEvals[i][j].second.real);
-                console.log("Imag2", sparseEvals[i][j].second.imag);
-            }
-        }
-        
-        // Create column log sizes for MerkleVerifier (matches Rust exactly)
-        // Rust: self.column_commitment_domains.iter().flat_map(|column_domain| [column_domain.log_size(); SECURE_EXTENSION_DEGREE])
+        // Create column log sizes for MerkleVerifier (matches Rust)
         uint32[] memory columnLogSizes = new uint32[](firstLayer.columnCommitmentDomains.length * SECURE_EXTENSION_DEGREE);
         for (uint256 i = 0; i < firstLayer.columnCommitmentDomains.length; i++) {
             uint32 logSize = CircleDomain.logSize(firstLayer.columnCommitmentDomains[i]);
@@ -1098,100 +1160,64 @@ library FriVerifier {
                 columnLogSizes[i * SECURE_EXTENSION_DEGREE + j] = logSize;
             }
         }
-        
-        console.log("DEBUG: Creating MerkleVerifier with columnLogSizes.length:", columnLogSizes.length);
-        for (uint256 i = 0; i < columnLogSizes.length; i++) {
-            console.log("columnLogSizes[%d] = %d", i, columnLogSizes[i]);
-        }
-        
-        // Create MerkleVerifier (matches Rust MerkleVerifier::new)
+
+        // Create MerkleVerifier
         MerkleVerifier.Verifier memory verifier = MerkleVerifier.newVerifier(
             firstLayer.proof.commitment,
             columnLogSizes
         );
-        
-        // Decode decommitment from bytes (TODO: implement proper decoding)
+
+        // Decode decommitment
         MerkleVerifier.Decommitment memory decommitment = _decodeDecommitment(
             firstLayer.proof.decommitment
         );
-        
-        // Prepare queries per log size (matches Rust: decommitment_positions_by_log_size)
-        MerkleVerifier.QueriesPerLogSize[] memory queriesPerLogSize = _prepareDecommitmentPositions(
-            firstLayer.columnCommitmentDomains,
-            queries
-        );
-        
-        console.log("DEBUG: Prepared decommitment positions:");
+
+        // Prepare queries per log size from decommitment positions
+        MerkleVerifier.QueriesPerLogSize[] memory queriesPerLogSize = new MerkleVerifier.QueriesPerLogSize[](numUniqueLogSizes);
+        for (uint256 i = 0; i < numUniqueLogSizes; i++) {
+            queriesPerLogSize[i] = MerkleVerifier.QueriesPerLogSize({
+                logSize: uniqueLogSizes[i],
+                queries: decommitmentsByLogSize[i]
+            });
+        }
+
+        // Debug: Print queriesPerLogSize
+        console.log("\n=== DEBUG: queriesPerLogSize ===");
+        console.log("numUniqueLogSizes:", numUniqueLogSizes);
         for (uint256 i = 0; i < queriesPerLogSize.length; i++) {
-            console.log("  logSize %d:", queriesPerLogSize[i].logSize);
+            console.log("  [%d] logSize:", i, queriesPerLogSize[i].logSize);
+            console.log("      queries.length:", queriesPerLogSize[i].queries.length);
             for (uint256 j = 0; j < queriesPerLogSize[i].queries.length; j++) {
-                console.log("    query[%d]: %d", j, queriesPerLogSize[i].queries[j]);
+                console.log("        query[%d]:", j, queriesPerLogSize[i].queries[j]);
             }
         }
-        
-        // The key insight: decommittedValues are the witness values, not the queried values
-        // In the new MerkleVerifier API, queriedValues should be empty since we're verifying against witness
-        uint32[] memory queriedValues = decommittedValues; // These ARE the values at the query positions
-        console.log("DEBUG: decommittedValues length:", decommittedValues.length);
-        console.log("DEBUG: queriedValues length:", queriedValues.length);
-        
-        // === DETAILED DEBUG: All inputs to MerkleVerifier.verify ===
-        console.log("\n=== MerkleVerifier.verify INPUTS ===");
-        
-        // 1. Verifier details
-        console.log("1. VERIFIER:");
-        console.log("  root:");
-        console.logBytes32(verifier.root);
-        console.log("  logSizes.length:", verifier.logSizes.length);
-        for (uint256 i = 0; i < verifier.logSizes.length; i++) {
-            console.log("    logSizes[%d] = %d", i, verifier.logSizes[i]);
-        }
-        console.log("  nColumnsPerLogSize.length:", verifier.nColumnsPerLogSize.length);
-        for (uint256 i = 0; i < verifier.nColumnsPerLogSize.length; i++) {
-            console.log("    nColumnsPerLogSize[%d] = %d", i, verifier.nColumnsPerLogSize[i]);
-        }
-        
-        // 2. Queries per log size
-        console.log("\n2. QUERIES PER LOG SIZE:");
-        console.log("  queriesPerLogSize.length:", queriesPerLogSize.length);
-        for (uint256 i = 0; i < queriesPerLogSize.length; i++) {
-            console.log("  [%d] logSize: %d, queries.length: %d", i, queriesPerLogSize[i].logSize, queriesPerLogSize[i].queries.length);
-            for (uint256 j = 0; j < queriesPerLogSize[i].queries.length; j++) {
-                console.log("      query[%d]: %d", j, queriesPerLogSize[i].queries[j]);
-            }
-        }
-        
-        // 3. Queried values
-        console.log("\n3. QUERIED VALUES:");
-        console.log("  queriedValues.length:", queriedValues.length);
-        for (uint256 i = 0; i < queriedValues.length && i < 40; i++) { // Limit to first 40 to avoid spam
-            console.log("    queriedValues[%d] = %d", i, queriedValues[i]);
-        }
-        if (queriedValues.length > 40) {
-            console.log("    ... and %d more values", queriedValues.length - 40);
-        }
-        
-        // 4. Decommitment
-        console.log("\n4. DECOMMITMENT:");
-        console.log("  hashWitness.length:", decommitment.hashWitness.length);
-        for (uint256 i = 0; i < decommitment.hashWitness.length; i++) {
-            console.log("    hashWitness[%d]:", i);
-            console.logBytes32(decommitment.hashWitness[i]);
-        }
-        console.log("  columnWitness.length:", decommitment.columnWitness.length);
-        for (uint256 i = 0; i < decommitment.columnWitness.length && i < 20; i++) { // Limit to first 20
-            console.log("    columnWitness[%d] = %d", i, decommitment.columnWitness[i]);
-        }
-        if (decommitment.columnWitness.length > 20) {
-            console.log("    ... and %d more witness values", decommitment.columnWitness.length - 20);
-        }
-        
-        console.log("\n=== END MerkleVerifier.verify INPUTS ===\n");
-        
-        // Verify Merkle proof using new API (matches Rust MerkleVerifier.verify)
-        MerkleVerifier.verify(verifier, queriesPerLogSize, queriedValues, decommitment);
-        
+        console.log("=== END queriesPerLogSize ===\n");
+        // Verify Merkle proof
+        MerkleVerifier.verify(verifier, queriesPerLogSize, decommittedValues, decommitment);
+
         return (true, sparseEvals);
+    }
+
+    /// @notice Flatten sparse evaluation to 1D array
+    function _flattenSparseEval(SparseEvaluation memory sparseEval) private pure returns (QM31Field.QM31[] memory flattened) {
+        uint256 totalCount = 0;
+        for (uint256 i = 0; i < sparseEval.subsetEvals.length; i++) {
+            totalCount += sparseEval.subsetEvals[i].length;
+        }
+        flattened = new QM31Field.QM31[](totalCount);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < sparseEval.subsetEvals.length; i++) {
+            for (uint256 j = 0; j < sparseEval.subsetEvals[i].length; j++) {
+                flattened[idx++] = sparseEval.subsetEvals[i][j];
+            }
+        }
+    }
+
+    /// @notice Count total M31 values in sparse evaluation
+    function _countM31Values(SparseEvaluation memory sparseEval) private pure returns (uint256 count) {
+        for (uint256 i = 0; i < sparseEval.subsetEvals.length; i++) {
+            count += sparseEval.subsetEvals[i].length * 4;  // Each QM31 = 4 M31 values
+        }
     }
 
     /// @notice Verifies all inner layer decommitments
@@ -1318,19 +1344,23 @@ library FriVerifier {
     // SUPPORTING FUNCTIONS FOR DECOMMITMENT
     // =============================================================================
 
-    /// @notice Folds query positions by a specified step
-    /// @param queries Original queries
-    /// @param foldStep Step size for folding
-    /// @return foldedQueries Folded query positions
     function foldQueries(
         Queries memory queries,
         uint32 foldStep
     ) internal pure returns (Queries memory foldedQueries) {
+        if (foldStep == 0) {
+            return queries;
+        }
+
+        // Fold all positions
         uint256[] memory foldedPositions = new uint256[](queries.positions.length);
-        
         for (uint256 i = 0; i < queries.positions.length; i++) {
             foldedPositions[i] = queries.positions[i] >> foldStep;
         }
+
+        // Remove consecutive duplicates (equivalent to Rust .dedup())
+        // Queries are already sorted, so we only need to remove consecutive duplicates
+        foldedPositions = _removeDuplicatesUint256(foldedPositions);
 
         foldedQueries = Queries({
             positions: foldedPositions,
@@ -1673,5 +1703,103 @@ library FriVerifier {
         }
         
         return foldedPositions;
+    }
+
+    // =============================================================================
+    // COMPUTE DECOMMITMENT POSITIONS AND REBUILD EVALS
+    // =============================================================================
+
+    /// @notice Sparse evaluation structure (matches Rust SparseEvaluation)
+    struct SparseEvaluation {
+        QM31Field.QM31[][] subsetEvals;           // subset_evals: Vec<Vec<SecureField>>
+        uint256[] subsetDomainIndexInitials;      // subset_domain_initial_indexes: Vec<usize>
+    }
+
+    /// @notice Iterator for witness evaluations
+    struct WitnessIterator {
+        QM31Field.QM31[] witness;
+        uint256 index;
+    }
+
+    /// @notice Computes decommitment positions and rebuilds evaluations (matches Rust compute_decommitment_positions_and_rebuild_evals)
+    /// @dev Groups queries by subset, fills in witness values where needed
+    /// @param queries Query positions (already folded to appropriate domain size)
+    /// @param queryEvals Evaluations at query positions
+    /// @param witnessIter Iterator over witness evaluations
+    /// @param foldStep Fold step (typically CIRCLE_TO_LINE_FOLD_STEP = 1)
+    /// @return decommitmentPositions All positions that need to be decommitted
+    /// @return sparseEval Sparse evaluation structure for folding
+    function computeDecommitmentPositionsAndRebuildEvals(
+        Queries memory queries,
+        QM31Field.QM31[] memory queryEvals,
+        WitnessIterator memory witnessIter,
+        uint32 foldStep
+    ) internal pure returns (
+        uint256[] memory decommitmentPositions,
+        SparseEvaluation memory sparseEval
+    ) {
+        require(queries.positions.length == queryEvals.length, "Query/eval length mismatch");
+        
+        uint256 subsetSize = 1 << foldStep;  // 2^fold_step
+        
+        // Count number of subsets by grouping queries
+        uint256 numSubsets = 0;
+        uint256 i = 0;
+        while (i < queries.positions.length) {
+            uint256 subsetId = queries.positions[i] >> foldStep;
+            numSubsets++;
+            // Skip all queries in same subset
+            while (i < queries.positions.length && (queries.positions[i] >> foldStep) == subsetId) {
+                i++;
+            }
+        }
+        
+        // Allocate arrays
+        uint256[] memory allDecommitmentPositions = new uint256[](numSubsets * subsetSize);
+        QM31Field.QM31[][] memory subsetEvals = new QM31Field.QM31[][](numSubsets);
+        uint256[] memory subsetDomainIndexInitials = new uint256[](numSubsets);
+        
+        uint256 queryIdx = 0;
+        uint256 decommitPosIdx = 0;
+        uint256 subsetIdx = 0;
+        
+        // Group queries by subset
+        while (queryIdx < queries.positions.length) {
+            uint256 firstQueryInSubset = queries.positions[queryIdx];
+            uint256 subsetId = firstQueryInSubset >> foldStep;
+            uint256 subsetStart = subsetId << foldStep;
+            
+            // Allocate this subset's evaluations
+            subsetEvals[subsetIdx] = new QM31Field.QM31[](subsetSize);
+            
+            // Fill in all positions in this subset
+            for (uint256 pos = 0; pos < subsetSize; pos++) {
+                uint256 position = subsetStart + pos;
+                allDecommitmentPositions[decommitPosIdx++] = position;
+                
+                // Check if this position matches a query
+                if (queryIdx < queries.positions.length && queries.positions[queryIdx] == position) {
+                    // Use query eval
+                    subsetEvals[subsetIdx][pos] = queryEvals[queryIdx];
+                    queryIdx++;
+                } else {
+                    // Use witness eval
+                    require(witnessIter.index < witnessIter.witness.length, "Insufficient witness");
+                    subsetEvals[subsetIdx][pos] = witnessIter.witness[witnessIter.index];
+                    witnessIter.index++;
+                }
+            }
+            
+            // Store bit-reversed subset start as domain index initial
+            subsetDomainIndexInitials[subsetIdx] = _bitReverseIndex(subsetStart, queries.logDomainSize);
+            
+            subsetIdx++;
+        }
+        
+        decommitmentPositions = allDecommitmentPositions;
+        sparseEval = SparseEvaluation({
+            subsetEvals: subsetEvals,
+            subsetDomainIndexInitials: subsetDomainIndexInitials
+        });
     }
 }
