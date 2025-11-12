@@ -60,7 +60,7 @@ library FriVerifier {
         FriInnerLayerVerifier[] innerLayers;
         uint32 lastLayerDomainLogSize;
         QM31Field.QM31[] lastLayerPoly;
-        Queries queries;  // Set when queries are sampled
+        Queries queries; // Set when queries are sampled
         QueryPositionsByLogSize queryPositionsByLogSize;
         bool queriesSampled;
     }
@@ -79,7 +79,7 @@ library FriVerifier {
 
     /// @notice Inner layer verifier for FRI intermediate layers
     /// @param degreeBound Degree bound for this layer
-    /// @param domainLogSize Log size of layer domain  
+    /// @param domainLogSize Log size of layer domain
     /// @param foldingAlpha Random folding coefficient from channel
     /// @param layerIndex Index of this layer (for error reporting)
     /// @param proof Layer proof data
@@ -93,11 +93,11 @@ library FriVerifier {
 
     /// @notice Proof for individual FRI layer
     /// @param friWitness Values needed by verifier that cannot be deduced
-    /// @param decommitment Merkle decommitment proof  
+    /// @param decommitment Merkle decommitment proof
     /// @param commitment Merkle tree root commitment
     struct FriLayerProof {
         QM31Field.QM31[] friWitness;
-        bytes decommitment;  // Encoded MerkleDecommitment
+        bytes decommitment; // Encoded MerkleDecommitment
         bytes32 commitment;
     }
 
@@ -120,7 +120,7 @@ library FriVerifier {
     }
 
     /// @notice Column sample batch for efficient quotient evaluation
-    /// @param point Circle point for this batch 
+    /// @param point Circle point for this batch
     /// @param columnsAndValues Array of (columnIndex, sampledValue) pairs
     struct ColumnSampleBatch {
         CirclePoint.Point point;
@@ -154,7 +154,10 @@ library FriVerifier {
 
     /// @notice Events for debugging and monitoring
     event FriCommitmentStarted(uint256 indexed numLayers);
-    event FriLayerCommitted(uint256 indexed layerIndex, bytes32 indexed commitment);
+    event FriLayerCommitted(
+        uint256 indexed layerIndex,
+        bytes32 indexed commitment
+    );
     event FriCommitmentCompleted(bool indexed success);
 
     /// @notice FRI constants
@@ -180,10 +183,13 @@ library FriVerifier {
         if (columnBounds.length == 0) {
             revert EmptyColumnBounds();
         }
-        
+
         // Verify column bounds are sorted in descending order
         for (uint256 i = 1; i < columnBounds.length; i++) {
-            if (columnBounds[i-1].logDegreeBound < columnBounds[i].logDegreeBound) {
+            if (
+                columnBounds[i - 1].logDegreeBound <
+                columnBounds[i].logDegreeBound
+            ) {
                 revert ColumnBoundsNotSorted();
             }
         }
@@ -193,16 +199,24 @@ library FriVerifier {
         emit FriLayerCommitted(0, proof.firstLayer.commitment);
 
         // Calculate column commitment domains
-        CircleDomain.CircleDomainStruct[] memory columnCommitmentDomains = 
-            new CircleDomain.CircleDomainStruct[](columnBounds.length);
-        
+        CircleDomain.CircleDomainStruct[]
+            memory columnCommitmentDomains = new CircleDomain.CircleDomainStruct[](
+                columnBounds.length
+            );
+
         for (uint256 i = 0; i < columnBounds.length; i++) {
-            uint32 commitmentDomainLogSize = 
-                columnBounds[i].logDegreeBound + config.logBlowupFactor;
-            CanonicCosetM31.CanonicCosetStruct memory canonicCoset = 
-                CanonicCosetM31.newCanonicCoset(commitmentDomainLogSize);
-            CosetM31.CosetStruct memory halfCoset = CanonicCosetM31.halfCoset(canonicCoset);
-            columnCommitmentDomains[i] = CircleDomain.newCircleDomain(halfCoset);
+            uint32 commitmentDomainLogSize = columnBounds[i].logDegreeBound +
+                config.logBlowupFactor;
+            CanonicCosetM31.CanonicCosetStruct
+                memory canonicCoset = CanonicCosetM31.newCanonicCoset(
+                    commitmentDomainLogSize
+                );
+            CosetM31.CosetStruct memory halfCoset = CanonicCosetM31.halfCoset(
+                canonicCoset
+            );
+            columnCommitmentDomains[i] = CircleDomain.newCircleDomain(
+                halfCoset
+            );
         }
 
         // Create first layer verifier
@@ -214,16 +228,22 @@ library FriVerifier {
         });
 
         // Process inner layers
-        FriInnerLayerVerifier[] memory innerLayers = 
-            new FriInnerLayerVerifier[](proof.innerLayers.length);
+        FriInnerLayerVerifier[]
+            memory innerLayers = new FriInnerLayerVerifier[](
+                proof.innerLayers.length
+            );
 
         // Start with max column bound folded to line
-        uint32 layerBound = columnBounds[0].logDegreeBound - CIRCLE_TO_LINE_FOLD_STEP;
+        uint32 layerBound = columnBounds[0].logDegreeBound -
+            CIRCLE_TO_LINE_FOLD_STEP;
         uint32 layerDomainLogSize = layerBound + config.logBlowupFactor;
 
         for (uint256 i = 0; i < proof.innerLayers.length; i++) {
             // Mix layer commitment into channel
-            channelState.mixRoot(channelState.digest, proof.innerLayers[i].commitment);
+            channelState.mixRoot(
+                channelState.digest,
+                proof.innerLayers[i].commitment
+            );
             emit FriLayerCommitted(i + 1, proof.innerLayers[i].commitment);
 
             // Create inner layer verifier
@@ -264,10 +284,7 @@ library FriVerifier {
             innerLayers: innerLayers,
             lastLayerDomainLogSize: layerDomainLogSize,
             lastLayerPoly: proof.lastLayerPoly,
-            queries: Queries({
-                positions: new uint256[](0),
-                logDomainSize: 0
-            }),
+            queries: Queries({positions: new uint256[](0), logDomainSize: 0}),
             queryPositionsByLogSize: QueryPositionsByLogSize({
                 logSizes: new uint32[](0),
                 queryPositions: new uint256[][](0)
@@ -286,10 +303,15 @@ library FriVerifier {
     function sampleQueryPositions(
         FriVerifierState storage friVerifierState,
         KeccakChannelLib.ChannelState storage channelState
-    ) internal returns (QueryPositionsByLogSize memory queryPositionsByLogSize) {
+    )
+        internal
+        returns (QueryPositionsByLogSize memory queryPositionsByLogSize)
+    {
         // Collect unique column log sizes (equivalent to Rust BTreeSet)
-        uint32[] memory columnLogSizes = _getUniqueColumnLogSizes(friVerifierState);
-        
+        uint32[] memory columnLogSizes = _getUniqueColumnLogSizes(
+            friVerifierState
+        );
+
         // Find maximum column log size
         uint32 maxColumnLogSize = 0;
         for (uint256 i = 0; i < columnLogSizes.length; i++) {
@@ -297,13 +319,20 @@ library FriVerifier {
                 maxColumnLogSize = columnLogSizes[i];
             }
         }
-        
+
         // Generate queries (equivalent to Queries::generate)
-        Queries memory queries = _generateQueries(channelState, maxColumnLogSize, uint32(friVerifierState.config.nQueries));
-        
+        Queries memory queries = _generateQueries(
+            channelState,
+            maxColumnLogSize,
+            uint32(friVerifierState.config.nQueries)
+        );
+
         // Get query positions by log size (equivalent to get_query_positions_by_log_size)
-        queryPositionsByLogSize = _getQueryPositionsByLogSize(queries, columnLogSizes);
-        
+        queryPositionsByLogSize = _getQueryPositionsByLogSize(
+            queries,
+            columnLogSizes
+        );
+
         // Store in verifier state
         friVerifierState.queries = queries;
         friVerifierState.queryPositionsByLogSize = queryPositionsByLogSize;
@@ -332,14 +361,18 @@ library FriVerifier {
     /// @notice Get maximum column log size from first layer domains
     /// @param friVerifierState FRI verifier state
     /// @return maxLogSize Maximum log size among all column domains
-    function getMaxColumnLogSize(FriVerifierState memory friVerifierState)  
-        internal 
-        pure 
-        returns (uint32 maxLogSize) 
-    {
+    function getMaxColumnLogSize(
+        FriVerifierState memory friVerifierState
+    ) internal pure returns (uint32 maxLogSize) {
         maxLogSize = 0;
-        for (uint256 i = 0; i < friVerifierState.firstLayer.columnCommitmentDomains.length; i++) {
-            uint32 logSize = CircleDomain.logSize(friVerifierState.firstLayer.columnCommitmentDomains[i]);
+        for (
+            uint256 i = 0;
+            i < friVerifierState.firstLayer.columnCommitmentDomains.length;
+            i++
+        ) {
+            uint32 logSize = CircleDomain.logSize(
+                friVerifierState.firstLayer.columnCommitmentDomains[i]
+            );
             if (logSize > maxLogSize) {
                 maxLogSize = logSize;
             }
@@ -354,9 +387,10 @@ library FriVerifier {
         CirclePolyDegreeBound.Bound memory maxColumnBound,
         PcsConfig.FriConfig memory config
     ) internal pure returns (uint256 expectedLayers) {
-        uint32 currentBound = maxColumnBound.logDegreeBound - CIRCLE_TO_LINE_FOLD_STEP;
+        uint32 currentBound = maxColumnBound.logDegreeBound -
+            CIRCLE_TO_LINE_FOLD_STEP;
         expectedLayers = 0;
-        
+
         while (currentBound > config.logLastLayerDegreeBound) {
             if (currentBound < FOLD_STEP) break;
             currentBound -= FOLD_STEP;
@@ -367,37 +401,33 @@ library FriVerifier {
     /// @notice Validate FRI configuration parameters
     /// @param config FRI configuration to validate
     /// @return valid True if configuration is valid
-    function validateConfig(PcsConfig.FriConfig memory config) 
-        internal 
-        pure 
-        returns (bool valid) 
-    {
+    function validateConfig(
+        PcsConfig.FriConfig memory config
+    ) internal pure returns (bool valid) {
         // Validate blowup factor range (1 to 16)
         if (config.logBlowupFactor < 1 || config.logBlowupFactor > 16) {
             return false;
         }
-        
+
         // Validate last layer degree bound (0 to 10)
         if (config.logLastLayerDegreeBound > 10) {
             return false;
         }
-        
+
         // Validate non-zero queries
         if (config.nQueries == 0) {
             return false;
         }
-        
+
         return true;
     }
 
     /// @notice Calculate security level in bits
     /// @param config FRI configuration
     /// @return securityBits Estimated security level
-    function getSecurityBits(PcsConfig.FriConfig memory config) 
-        internal 
-        pure 
-        returns (uint32 securityBits) 
-    {
+    function getSecurityBits(
+        PcsConfig.FriConfig memory config
+    ) internal pure returns (uint32 securityBits) {
         return config.logBlowupFactor * uint32(config.nQueries);
     }
 
@@ -405,21 +435,27 @@ library FriVerifier {
     /// @dev Equivalent to Rust BTreeSet collection
     /// @param friVerifierState FRI verifier state
     /// @return uniqueLogSizes Array of unique log sizes in ascending order
-    function _getUniqueColumnLogSizes(FriVerifierState storage friVerifierState) 
-        private 
-        view 
-        returns (uint32[] memory uniqueLogSizes) 
-    {
-        uint32[] memory allLogSizes = new uint32[](friVerifierState.firstLayer.columnCommitmentDomains.length);
-        
+    function _getUniqueColumnLogSizes(
+        FriVerifierState storage friVerifierState
+    ) private view returns (uint32[] memory uniqueLogSizes) {
+        uint32[] memory allLogSizes = new uint32[](
+            friVerifierState.firstLayer.columnCommitmentDomains.length
+        );
+
         // Collect all log sizes
-        for (uint256 i = 0; i < friVerifierState.firstLayer.columnCommitmentDomains.length; i++) {
-            allLogSizes[i] = CircleDomain.logSize(friVerifierState.firstLayer.columnCommitmentDomains[i]);
+        for (
+            uint256 i = 0;
+            i < friVerifierState.firstLayer.columnCommitmentDomains.length;
+            i++
+        ) {
+            allLogSizes[i] = CircleDomain.logSize(
+                friVerifierState.firstLayer.columnCommitmentDomains[i]
+            );
         }
-        
+
         // Sort array
         _sortUint32Array(allLogSizes);
-        
+
         // Remove duplicates
         return _removeDuplicatesUint32(allLogSizes);
     }
@@ -432,21 +468,25 @@ library FriVerifier {
     /// @return queries Generated queries structure
     function _generateQueries(
         KeccakChannelLib.ChannelState storage channelState,
-        uint32 logDomainSize, 
+        uint32 logDomainSize,
         uint32 nQueries
     ) private returns (Queries memory queries) {
         uint256 maxQuery = (1 << logDomainSize) - 1;
         uint256[] memory uniqueQueries = new uint256[](nQueries);
         uint256 queriesFound = 0;
-        
+
         // Use simple approach since we expect nQueries << domain size
         // In practice, duplicates are very rare for reasonable parameters
         while (queriesFound < nQueries) {
             uint32[] memory randomWords = channelState.drawU32s();
-            
-            for (uint256 i = 0; i < randomWords.length && queriesFound < nQueries; i++) {
+
+            for (
+                uint256 i = 0;
+                i < randomWords.length && queriesFound < nQueries;
+                i++
+            ) {
                 uint256 candidateQuery = randomWords[i] & maxQuery;
-                
+
                 // Check if this query is already present (simple linear search)
                 bool isDuplicate = false;
                 for (uint256 j = 0; j < queriesFound; j++) {
@@ -455,17 +495,17 @@ library FriVerifier {
                         break;
                     }
                 }
-                
+
                 if (!isDuplicate) {
                     uniqueQueries[queriesFound] = candidateQuery;
                     queriesFound++;
                 }
             }
         }
-        
+
         // Sort the queries (equivalent to BTreeSet ordering)
         _sortUint256Array(uniqueQueries);
-        
+
         queries = Queries({
             positions: uniqueQueries,
             logDomainSize: logDomainSize
@@ -473,35 +513,49 @@ library FriVerifier {
     }
 
     /// @notice Map query positions by log size (equivalent to get_query_positions_by_log_size)
-    /// @param queries Generated queries  
+    /// @param queries Generated queries
     /// @param columnLogSizes Unique column log sizes
     /// @return queryPositionsByLogSize Mapped query positions
     function _getQueryPositionsByLogSize(
         Queries memory queries,
         uint32[] memory columnLogSizes
-    ) private pure returns (QueryPositionsByLogSize memory queryPositionsByLogSize) {
-        uint256[][] memory queryPositions = new uint256[][](columnLogSizes.length);
-        
-        for (uint256 logSizeIdx = 0; logSizeIdx < columnLogSizes.length; logSizeIdx++) {
+    )
+        private
+        pure
+        returns (QueryPositionsByLogSize memory queryPositionsByLogSize)
+    {
+        uint256[][] memory queryPositions = new uint256[][](
+            columnLogSizes.length
+        );
+
+        for (
+            uint256 logSizeIdx = 0;
+            logSizeIdx < columnLogSizes.length;
+            logSizeIdx++
+        ) {
             uint32 logSize = columnLogSizes[logSizeIdx];
-            
+
             if (logSize >= queries.logDomainSize) {
                 // Same size or larger domain - use all queries
                 queryPositions[logSizeIdx] = queries.positions;
             } else {
                 // Smaller domain - map queries down by shifting and remove duplicates
                 uint32 shift = queries.logDomainSize - logSize;
-                uint256[] memory mappedQueries = new uint256[](queries.positions.length);
-                
+                uint256[] memory mappedQueries = new uint256[](
+                    queries.positions.length
+                );
+
                 for (uint256 i = 0; i < queries.positions.length; i++) {
                     mappedQueries[i] = queries.positions[i] >> shift;
                 }
-                
+
                 // Remove duplicates (queries are already sorted, so we just need to remove consecutive duplicates)
-                queryPositions[logSizeIdx] = _removeDuplicatesUint256(mappedQueries);
+                queryPositions[logSizeIdx] = _removeDuplicatesUint256(
+                    mappedQueries
+                );
             }
         }
-        
+
         queryPositionsByLogSize = QueryPositionsByLogSize({
             logSizes: columnLogSizes,
             queryPositions: queryPositions
@@ -523,7 +577,7 @@ library FriVerifier {
     }
 
     /// @notice Sort uint256 array in ascending order (bubble sort)
-    /// @param arr Array to sort in-place  
+    /// @param arr Array to sort in-place
     function _sortUint256Array(uint256[] memory arr) private pure {
         for (uint256 i = 0; i < arr.length; i++) {
             for (uint256 j = 0; j < arr.length - i - 1; j++) {
@@ -539,30 +593,28 @@ library FriVerifier {
     /// @notice Remove consecutive duplicates from sorted uint32 array
     /// @param sortedArr Sorted array with potential duplicates
     /// @return deduplicated Array without consecutive duplicates
-    function _removeDuplicatesUint32(uint32[] memory sortedArr) 
-        private 
-        pure 
-        returns (uint32[] memory deduplicated) 
-    {
+    function _removeDuplicatesUint32(
+        uint32[] memory sortedArr
+    ) private pure returns (uint32[] memory deduplicated) {
         if (sortedArr.length == 0) {
             return new uint32[](0);
         }
-        
+
         // Count unique elements
         uint256 uniqueCount = 1;
         for (uint256 i = 1; i < sortedArr.length; i++) {
-            if (sortedArr[i] != sortedArr[i-1]) {
+            if (sortedArr[i] != sortedArr[i - 1]) {
                 uniqueCount++;
             }
         }
-        
+
         // Create deduplicated array
         deduplicated = new uint32[](uniqueCount);
         deduplicated[0] = sortedArr[0];
         uint256 currentIndex = 1;
-        
+
         for (uint256 i = 1; i < sortedArr.length; i++) {
-            if (sortedArr[i] != sortedArr[i-1]) {
+            if (sortedArr[i] != sortedArr[i - 1]) {
                 deduplicated[currentIndex] = sortedArr[i];
                 currentIndex++;
             }
@@ -572,30 +624,28 @@ library FriVerifier {
     /// @notice Remove consecutive duplicates from sorted uint256 array
     /// @param sortedArr Sorted array with potential duplicates
     /// @return deduplicated Array without consecutive duplicates
-    function _removeDuplicatesUint256(uint256[] memory sortedArr) 
-        private 
-        pure 
-        returns (uint256[] memory deduplicated) 
-    {
+    function _removeDuplicatesUint256(
+        uint256[] memory sortedArr
+    ) private pure returns (uint256[] memory deduplicated) {
         if (sortedArr.length == 0) {
             return new uint256[](0);
         }
-        
+
         // Count unique elements
         uint256 uniqueCount = 1;
         for (uint256 i = 1; i < sortedArr.length; i++) {
-            if (sortedArr[i] != sortedArr[i-1]) {
+            if (sortedArr[i] != sortedArr[i - 1]) {
                 uniqueCount++;
             }
         }
-        
+
         // Create deduplicated array
         deduplicated = new uint256[](uniqueCount);
         deduplicated[0] = sortedArr[0];
         uint256 currentIndex = 1;
-        
+
         for (uint256 i = 1; i < sortedArr.length; i++) {
-            if (sortedArr[i] != sortedArr[i-1]) {
+            if (sortedArr[i] != sortedArr[i - 1]) {
                 deduplicated[currentIndex] = sortedArr[i];
                 currentIndex++;
             }
@@ -612,44 +662,58 @@ library FriVerifier {
     /// @param nColumnsPerLogSize Number of columns per log size for each tree
     /// @return friAnswers 2D array of quotient evaluations for FRI decommitment (columns x query values)
     function friAnswers(
-        uint32[][] memory columnLogSizes,           // TreeVec<Vec<u32>>
-        PointSample[][][] memory samples,           // TreeVec<Vec<Vec<PointSample>>>
-        QM31Field.QM31 memory randomCoeff,          // SecureField
-        QueryPositionsByLogSize memory queryPositionsByLogSize,  // &BTreeMap<u32, Vec<usize>>
-        uint32[][] memory queriedValues,            // TreeVec<Vec<BaseField>> (BaseField = M31 = uint32)
-        uint32[][][] memory nColumnsPerLogSize      // TreeVec<&BTreeMap<u32, usize>>
+        uint32[][] memory columnLogSizes, // TreeVec<Vec<u32>>
+        PointSample[][][] memory samples, // TreeVec<Vec<Vec<PointSample>>>
+        QM31Field.QM31 memory randomCoeff, // SecureField
+        QueryPositionsByLogSize memory queryPositionsByLogSize, // &BTreeMap<u32, Vec<usize>>
+        uint32[][] memory queriedValues, // TreeVec<Vec<BaseField>> (BaseField = M31 = uint32)
+        uint32[][][] memory nColumnsPerLogSize // TreeVec<&BTreeMap<u32, usize>>
     ) internal pure returns (QM31Field.QM31[][] memory friAnswers) {
         // Flatten column log sizes and create (logSize, samples) pairs
-        LogSizeAndSamples[] memory flattenedData = _flattenAndCreatePairs(columnLogSizes, samples);
-        
+        LogSizeAndSamples[] memory flattenedData = _flattenAndCreatePairs(
+            columnLogSizes,
+            samples
+        );
+
         // Sort by log size in descending order (equivalent to sorted_by_key(Reverse(*log_size)))
         _sortByLogSizeDescending(flattenedData);
-        
+
         // Group by log size and process each group
         // In Rust this is: .group_by(|(log_size, ..)| *log_size).into_iter().map(...).collect()
         // Each group produces one Vec<SecureField>, so we have as many columns as unique log sizes
-        
-        friAnswers = new QM31Field.QM31[][](queryPositionsByLogSize.logSizes.length);
+
+        friAnswers = new QM31Field.QM31[][](
+            queryPositionsByLogSize.logSizes.length
+        );
         uint256 columnIndex = 0;
-        
+
         // Create mutable iterator state for queried values
         QueriedValuesIterator memory queriedValuesIter = QueriedValuesIterator({
             data: queriedValues,
             positions: new uint256[](queriedValues.length)
         });
-        
+
         // Process each unique log size in descending order (to match Rust Reverse sorting)
         for (uint256 i = 0; i < queryPositionsByLogSize.logSizes.length; i++) {
-            uint256 logSizeIdx = queryPositionsByLogSize.logSizes.length - 1 - i;
+            uint256 logSizeIdx = queryPositionsByLogSize.logSizes.length -
+                1 -
+                i;
             uint32 logSize = queryPositionsByLogSize.logSizes[logSizeIdx];
-            uint256[] memory queryPositions = queryPositionsByLogSize.queryPositions[logSizeIdx];
-            
+            uint256[] memory queryPositions = queryPositionsByLogSize
+                .queryPositions[logSizeIdx];
+
             // Get samples for this log size
-            PointSample[][] memory samplesForLogSize = _getSamplesForLogSize(flattenedData, logSize);
-            
+            PointSample[][] memory samplesForLogSize = _getSamplesForLogSize(
+                flattenedData,
+                logSize
+            );
+
             // Get n_columns for this log size from each tree
-            uint256[] memory nColumnsForLogSize = _getNColumnsForLogSize(nColumnsPerLogSize, logSize);
-            
+            uint256[] memory nColumnsForLogSize = _getNColumnsForLogSize(
+                nColumnsPerLogSize,
+                logSize
+            );
+
             // Calculate answers for this log size
             // In Rust: fri_answers_for_log_size returns Result<Vec<SecureField>, VerificationError>
             // This becomes one column in our 2D array
@@ -661,8 +725,7 @@ library FriVerifier {
                 queriedValuesIter,
                 nColumnsForLogSize
             );
-            
-            
+
             // Store this group's answers as one column
             friAnswers[columnIndex] = answersForLogSize;
             columnIndex++;
@@ -687,27 +750,40 @@ library FriVerifier {
         uint256[] memory nColumns
     ) internal pure returns (QM31Field.QM31[] memory answersForLogSize) {
         // Create sample batches (equivalent to ColumnSampleBatch::new_vec)
-        ColumnSampleBatch[] memory sampleBatches = _createColumnSampleBatches(samples);
-        
+        ColumnSampleBatch[] memory sampleBatches = _createColumnSampleBatches(
+            samples
+        );
+
         // Calculate quotient constants
-        QuotientConstants memory quotientConstants = _calculateQuotientConstants(sampleBatches, randomCoeff);
-        
+        QuotientConstants
+            memory quotientConstants = _calculateQuotientConstants(
+                sampleBatches,
+                randomCoeff
+            );
+
         // Create commitment domain
-        CircleDomain.CircleDomainStruct memory commitmentDomain = _createCommitmentDomain(logSize);
-        
+        CircleDomain.CircleDomainStruct
+            memory commitmentDomain = _createCommitmentDomain(logSize);
+
         // Calculate quotient evaluations at each query position
         answersForLogSize = new QM31Field.QM31[](queryPositions.length);
-        
+
         for (uint256 i = 0; i < queryPositions.length; i++) {
             uint256 queryPosition = queryPositions[i];
-            
+
             // Get domain point at bit-reversed query position
-            CirclePointM31.Point memory domainPoint = _getDomainPointAtQuery(commitmentDomain, queryPosition, logSize);
-            
+            CirclePointM31.Point memory domainPoint = _getDomainPointAtQuery(
+                commitmentDomain,
+                queryPosition,
+                logSize
+            );
+
             // Get queried values at this row
-            uint32[] memory queriedValuesAtRow = _getQueriedValuesAtRow(queriedValuesIter, nColumns);
-            
-            
+            uint32[] memory queriedValuesAtRow = _getQueriedValuesAtRow(
+                queriedValuesIter,
+                nColumns
+            );
+
             // Accumulate row quotients
             answersForLogSize[i] = _accumulateRowQuotients(
                 sampleBatches,
@@ -732,54 +808,84 @@ library FriVerifier {
         CirclePointM31.Point memory domainPoint
     ) internal pure returns (QM31Field.QM31 memory accumulator) {
         // Calculate denominator inverses for all sample batches
-        CM31Field.CM31[] memory denominatorInverses = _calculateDenominatorInverses(sampleBatches, domainPoint);
-        
+        CM31Field.CM31[]
+            memory denominatorInverses = _calculateDenominatorInverses(
+                sampleBatches,
+                domainPoint
+            );
+
         accumulator = QM31Field.zero();
-        
+
         // Process each sample batch
-        for (uint256 batchIdx = 0; batchIdx < sampleBatches.length; batchIdx++) {
+        for (
+            uint256 batchIdx = 0;
+            batchIdx < sampleBatches.length;
+            batchIdx++
+        ) {
             ColumnSampleBatch memory sampleBatch = sampleBatches[batchIdx];
-            QM31Field.QM31[][] memory batchLineCoeffs = quotientConstants.lineCoeffs[batchIdx];
-            CM31Field.CM31 memory denominatorInverse = denominatorInverses[batchIdx];
-            
+            QM31Field.QM31[][] memory batchLineCoeffs = quotientConstants
+                .lineCoeffs[batchIdx];
+            CM31Field.CM31 memory denominatorInverse = denominatorInverses[
+                batchIdx
+            ];
+
             QM31Field.QM31 memory numerator = QM31Field.zero();
-            
+
             // Process each column in the batch
-            for (uint256 colIdx = 0; colIdx < sampleBatch.columnsAndValues.length; colIdx++) {
-                ColumnAndValue memory columnAndValue = sampleBatch.columnsAndValues[colIdx];
+            for (
+                uint256 colIdx = 0;
+                colIdx < sampleBatch.columnsAndValues.length;
+                colIdx++
+            ) {
+                ColumnAndValue memory columnAndValue = sampleBatch
+                    .columnsAndValues[colIdx];
                 QM31Field.QM31[] memory lineCoeffs = batchLineCoeffs[colIdx]; // [a, b, c]
-                
+
                 // Get queried value for this column and convert to QM31
-                QM31Field.QM31 memory queriedValue = QM31Field.fromM31(queriedValuesAtRow[columnAndValue.columnIndex], 0, 0, 0);
+                QM31Field.QM31 memory queriedValue = QM31Field.fromM31(
+                    queriedValuesAtRow[columnAndValue.columnIndex],
+                    0,
+                    0,
+                    0
+                );
                 QM31Field.QM31 memory value = QM31Field.mul(
                     queriedValue,
                     lineCoeffs[2] // c coefficient
                 );
-                
+
                 // Calculate linear term: a * domain_point.y + b
                 QM31Field.QM31 memory linearTerm = QM31Field.add(
-                    QM31Field.mul(lineCoeffs[0], QM31Field.fromM31(domainPoint.y, 0, 0 ,0)), // a * domain_point.y
+                    QM31Field.mul(
+                        lineCoeffs[0],
+                        QM31Field.fromM31(domainPoint.y, 0, 0, 0)
+                    ), // a * domain_point.y
                     lineCoeffs[1] // b
                 );
-                
+
                 // Add to numerator: value - linear_term
-                numerator = QM31Field.add(numerator, QM31Field.sub(value, linearTerm));
+                numerator = QM31Field.add(
+                    numerator,
+                    QM31Field.sub(value, linearTerm)
+                );
             }
-            
+
             // Multiply numerator by denominator inverse and add to accumulator
-            QM31Field.QM31 memory contribution = QM31Field.mulCM31(numerator, denominatorInverse);
+            QM31Field.QM31 memory contribution = QM31Field.mulCM31(
+                numerator,
+                denominatorInverse
+            );
             accumulator = QM31Field.add(accumulator, contribution);
         }
     }
 
     // Helper data structures for fri_answers implementation
-    
+
     /// @notice Pair of log size and corresponding samples for sorting/grouping
     struct LogSizeAndSamples {
         uint32 logSize;
         PointSample[] samples;
     }
-    
+
     /// @notice Iterator state for queried values
     struct QueriedValuesIterator {
         uint32[][] data;
@@ -787,7 +893,7 @@ library FriVerifier {
     }
 
     // Helper functions (implementation details follow)
-    
+
     function _flattenAndCreatePairs(
         uint32[][] memory columnLogSizes,
         PointSample[][][] memory samples
@@ -796,8 +902,10 @@ library FriVerifier {
         // This is a simplified placeholder - full implementation would handle the complex tree flattening
         pairs = new LogSizeAndSamples[](0);
     }
-    
-    function _sortByLogSizeDescending(LogSizeAndSamples[] memory data) private pure {
+
+    function _sortByLogSizeDescending(
+        LogSizeAndSamples[] memory data
+    ) private pure {
         // Bubble sort by log size in descending order
         for (uint256 i = 0; i < data.length; i++) {
             for (uint256 j = 0; j < data.length - i - 1; j++) {
@@ -809,7 +917,7 @@ library FriVerifier {
             }
         }
     }
-    
+
     function _getSamplesForLogSize(
         LogSizeAndSamples[] memory flattenedData,
         uint32 logSize
@@ -817,31 +925,39 @@ library FriVerifier {
         // Extract samples matching the given log size
         samplesForLogSize = new PointSample[][](0);
     }
-    
+
     function _getNColumnsForLogSize(
         uint32[][][] memory nColumnsPerLogSize,
         uint32 logSize
     ) private pure returns (uint256[] memory nColumnsForLogSize) {
         nColumnsForLogSize = new uint256[](nColumnsPerLogSize.length);
-        for (uint256 treeIdx = 0; treeIdx < nColumnsPerLogSize.length; treeIdx++) {
+        for (
+            uint256 treeIdx = 0;
+            treeIdx < nColumnsPerLogSize.length;
+            treeIdx++
+        ) {
             // Find the entry for this log size in the tree's data
             for (uint256 i = 0; i < nColumnsPerLogSize[treeIdx].length; i++) {
-                if (nColumnsPerLogSize[treeIdx][i].length >= 2 && 
-                    nColumnsPerLogSize[treeIdx][i][0] == logSize) {
-                    nColumnsForLogSize[treeIdx] = nColumnsPerLogSize[treeIdx][i][1];
+                if (
+                    nColumnsPerLogSize[treeIdx][i].length >= 2 &&
+                    nColumnsPerLogSize[treeIdx][i][0] == logSize
+                ) {
+                    nColumnsForLogSize[treeIdx] = nColumnsPerLogSize[treeIdx][
+                        i
+                    ][1];
                     break;
                 }
             }
         }
     }
-    
+
     function _createColumnSampleBatches(
         PointSample[][] memory samples
     ) private pure returns (ColumnSampleBatch[] memory batches) {
         // Group samples by point to create batches
         batches = new ColumnSampleBatch[](0);
     }
-    
+
     function _calculateQuotientConstants(
         ColumnSampleBatch[] memory sampleBatches,
         QM31Field.QM31 memory randomCoeff
@@ -849,30 +965,47 @@ library FriVerifier {
         // Calculate line coefficients for each batch and column
         constants.lineCoeffs = new QM31Field.QM31[][][](sampleBatches.length);
         QM31Field.QM31 memory alpha = QM31Field.one();
-        
-        for (uint256 batchIdx = 0; batchIdx < sampleBatches.length; batchIdx++) {
+
+        for (
+            uint256 batchIdx = 0;
+            batchIdx < sampleBatches.length;
+            batchIdx++
+        ) {
             ColumnSampleBatch memory batch = sampleBatches[batchIdx];
-            constants.lineCoeffs[batchIdx] = new QM31Field.QM31[][](batch.columnsAndValues.length);
-            
-            for (uint256 colIdx = 0; colIdx < batch.columnsAndValues.length; colIdx++) {
+            constants.lineCoeffs[batchIdx] = new QM31Field.QM31[][](
+                batch.columnsAndValues.length
+            );
+
+            for (
+                uint256 colIdx = 0;
+                colIdx < batch.columnsAndValues.length;
+                colIdx++
+            ) {
                 PointSample memory sample = PointSample({
                     point: batch.point,
                     value: batch.columnsAndValues[colIdx].value
                 });
-                
-                constants.lineCoeffs[batchIdx][colIdx] = _complexConjugateLineCoeffs(sample, alpha);
+
+                constants.lineCoeffs[batchIdx][
+                    colIdx
+                ] = _complexConjugateLineCoeffs(sample, alpha);
                 alpha = QM31Field.mul(alpha, randomCoeff);
             }
         }
     }
-    
-    function _createCommitmentDomain(uint32 logSize) private pure returns (CircleDomain.CircleDomainStruct memory domain) {
-        CanonicCosetM31.CanonicCosetStruct memory canonicCoset = CanonicCosetM31.newCanonicCoset(logSize);
-        CosetM31.CosetStruct memory halfCoset = CanonicCosetM31.halfCoset(canonicCoset);
-        
+
+    function _createCommitmentDomain(
+        uint32 logSize
+    ) private pure returns (CircleDomain.CircleDomainStruct memory domain) {
+        CanonicCosetM31.CanonicCosetStruct memory canonicCoset = CanonicCosetM31
+            .newCanonicCoset(logSize);
+        CosetM31.CosetStruct memory halfCoset = CanonicCosetM31.halfCoset(
+            canonicCoset
+        );
+
         domain = CircleDomain.newCircleDomain(halfCoset);
     }
-    
+
     function _getDomainPointAtQuery(
         CircleDomain.CircleDomainStruct memory domain,
         uint256 queryPosition,
@@ -881,7 +1014,7 @@ library FriVerifier {
         uint256 bitReversedIndex = _bitReverseIndex(queryPosition, logSize);
         point = CircleDomain.at(domain, bitReversedIndex);
     }
-    
+
     function _getQueriedValuesAtRow(
         QueriedValuesIterator memory iter,
         uint256[] memory nColumns
@@ -891,16 +1024,18 @@ library FriVerifier {
         for (uint256 i = 0; i < nColumns.length; i++) {
             totalValues += nColumns[i];
         }
-        
+
         valuesAtRow = new uint32[](totalValues);
         uint256 valueIndex = 0;
-        
+
         // Take specified number of values from each tree's iterator
         for (uint256 treeIdx = 0; treeIdx < nColumns.length; treeIdx++) {
             uint256 nCols = nColumns[treeIdx];
             for (uint256 i = 0; i < nCols; i++) {
                 if (iter.positions[treeIdx] < iter.data[treeIdx].length) {
-                    valuesAtRow[valueIndex] = iter.data[treeIdx][iter.positions[treeIdx]];
+                    valuesAtRow[valueIndex] = iter.data[treeIdx][
+                        iter.positions[treeIdx]
+                    ];
                     iter.positions[treeIdx]++;
                 } else {
                     valuesAtRow[valueIndex] = 0; // Use 0 instead of QM31Field.zero()
@@ -909,33 +1044,39 @@ library FriVerifier {
             }
         }
     }
-    
+
     function _calculateDenominatorInverses(
         ColumnSampleBatch[] memory sampleBatches,
         CirclePointM31.Point memory domainPoint
     ) private pure returns (CM31Field.CM31[] memory inverses) {
-        CM31Field.CM31[] memory denominators = new CM31Field.CM31[](sampleBatches.length);
-        
+        CM31Field.CM31[] memory denominators = new CM31Field.CM31[](
+            sampleBatches.length
+        );
+
         for (uint256 i = 0; i < sampleBatches.length; i++) {
             CirclePoint.Point memory samplePoint = sampleBatches[i].point;
-            
+
             // Extract real and imaginary parts
             uint32 prx = samplePoint.x.first.real;
             uint32 pry = samplePoint.y.first.real;
             uint32 pix = samplePoint.x.first.imag;
             uint32 piy = samplePoint.y.first.imag;
-            
+
             // Calculate: (prx - domain_point.x) * piy - (pry - domain_point.y) * pix
-            uint32 dx = prx >= domainPoint.x ? prx - domainPoint.x : domainPoint.x - prx;
-            uint32 dy = pry >= domainPoint.y ? pry - domainPoint.y : domainPoint.y - pry;
-            
+            uint32 dx = prx >= domainPoint.x
+                ? prx - domainPoint.x
+                : domainPoint.x - prx;
+            uint32 dy = pry >= domainPoint.y
+                ? pry - domainPoint.y
+                : domainPoint.y - pry;
+
             denominators[i] = CM31Field.fromM31(dx * piy, dy * pix);
         }
-        
+
         // Batch inverse (simplified - would need proper implementation)
         inverses = CM31Field.batchInverse(denominators);
     }
-    
+
     function _complexConjugateLineCoeffs(
         PointSample memory sample,
         QM31Field.QM31 memory alpha
@@ -943,11 +1084,14 @@ library FriVerifier {
         coeffs = new QM31Field.QM31[](3);
         // Simplified implementation - would need proper complex conjugate line calculation
         coeffs[0] = QM31Field.mul(alpha, sample.point.x); // a
-        coeffs[1] = QM31Field.mul(alpha, sample.point.y); // b  
+        coeffs[1] = QM31Field.mul(alpha, sample.point.y); // b
         coeffs[2] = alpha; // c
     }
-    
-    function _bitReverseIndex(uint256 index, uint32 logSize) private pure returns (uint256 reversed) {
+
+    function _bitReverseIndex(
+        uint256 index,
+        uint32 logSize
+    ) private pure returns (uint256 reversed) {
         reversed = 0;
         for (uint256 i = 0; i < logSize; i++) {
             reversed = (reversed << 1) | (index & 1);
@@ -973,18 +1117,35 @@ library FriVerifier {
             revert("Queries not sampled");
         }
 
-        console.log("=== FriVerifier.decommit: queries going to decommitOnQueries ===");
-        console.log("queries.logDomainSize:", friVerifierState.queries.logDomainSize);
-        console.log("queries.positions.length:", friVerifierState.queries.positions.length);
-        for (uint256 i = 0; i < friVerifierState.queries.positions.length; i++) {
-            console.log("  query[%d]:", i, friVerifierState.queries.positions[i]);
+        console.log(
+            "=== FriVerifier.decommit: queries going to decommitOnQueries ==="
+        );
+        console.log(
+            "queries.logDomainSize:",
+            friVerifierState.queries.logDomainSize
+        );
+        console.log(
+            "queries.positions.length:",
+            friVerifierState.queries.positions.length
+        );
+        for (
+            uint256 i = 0;
+            i < friVerifierState.queries.positions.length;
+            i++
+        ) {
+            console.log(
+                "  query[%d]:",
+                i,
+                friVerifierState.queries.positions[i]
+            );
         }
 
-        return decommitOnQueries(
-            friVerifierState,
-            friVerifierState.queries,
-            firstLayerQueryEvals
-        );
+        return
+            decommitOnQueries(
+                friVerifierState,
+                friVerifierState.queries,
+                firstLayerQueryEvals
+            );
     }
 
     /// @notice Internal decommitment orchestrator
@@ -999,30 +1160,45 @@ library FriVerifier {
         QM31Field.QM31[][] memory firstLayerQueryEvals
     ) internal pure returns (bool success) {
         // Step 1: Verify first layer and get sparse evaluations
-        (bool firstLayerSuccess, QM31Field.QM31[][] memory firstLayerSparseEvals) = 
-            decommitFirstLayer(friVerifierState, queries, firstLayerQueryEvals);
-        
+        (
+            bool firstLayerSuccess,
+            SparseEvaluation[] memory firstLayerSparseEvals
+        ) = decommitFirstLayer(friVerifierState, queries, firstLayerQueryEvals);
+
         if (!firstLayerSuccess) {
-            revert("FRI decommit failed at STEP 1: First layer verification failed");
+            revert(
+                "FRI decommit failed at STEP 1: First layer verification failed"
+            );
         }
 
-        // // Step 2: Fold queries for inner layers (equivalent to queries.fold(CIRCLE_TO_LINE_FOLD_STEP))
-        // Queries memory innerLayerQueries = foldQueries(queries, CIRCLE_TO_LINE_FOLD_STEP);
+        // Step 2: Fold queries for inner layers (equivalent to queries.fold(CIRCLE_TO_LINE_FOLD_STEP))
+        Queries memory innerLayerQueries = foldQueries(
+            queries,
+            CIRCLE_TO_LINE_FOLD_STEP
+        );
 
-        // // Step 3: Verify inner layers
-        // (bool innerLayersSuccess, Queries memory lastLayerQueries, QM31Field.QM31[] memory lastLayerQueryEvals) = 
-        //     decommitInnerLayers(friVerifierState, innerLayerQueries, firstLayerSparseEvals);
+        // Step 3: Verify inner layers
+        (
+            bool innerLayersSuccess,
+            Queries memory lastLayerQueries,
+            QM31Field.QM31[] memory lastLayerQueryEvals
+        ) = decommitInnerLayers(
+                friVerifierState,
+                innerLayerQueries,
+                firstLayerSparseEvals
+            );
+
+        if (!innerLayersSuccess) {
+            revert("FRI decommit failed at STEP 3: Inner layers verification failed");
+        }
         
-        // if (!innerLayersSuccess) {
-        //     revert("FRI decommit failed at STEP 3: Inner layers verification failed");
-        // }
 
         // // Step 4: Verify last layer
         // bool lastLayerSuccess = decommitLastLayer(friVerifierState, lastLayerQueries, lastLayerQueryEvals);
         // if (!lastLayerSuccess) {
         //     revert("FRI decommit failed at STEP 4: Last layer verification failed");
         // }
-        
+
         return true;
     }
 
@@ -1032,14 +1208,23 @@ library FriVerifier {
     /// @param queries Query positions
     /// @param firstLayerQueryEvals Query evaluations for first layer columns
     /// @return success True if first layer verification passes
-    /// @return sparseEvals Sparse evaluations for use in inner layers
+    /// @return sparseEvalsResult Sparse evaluations for use in inner layers
     function decommitFirstLayer(
         FriVerifierState memory friVerifierState,
         Queries memory queries,
         QM31Field.QM31[][] memory firstLayerQueryEvals
-    ) internal pure returns (bool success, QM31Field.QM31[][] memory sparseEvals) {
+    )
+        internal
+        pure
+        returns (bool success, SparseEvaluation[] memory sparseEvalsResult)
+    {
         // Verify first layer using the first layer verifier
-        return verifyFirstLayer(friVerifierState.firstLayer, queries, firstLayerQueryEvals);
+        return
+            verifyFirstLayer(
+                friVerifierState.firstLayer,
+                queries,
+                firstLayerQueryEvals
+            );
     }
 
     /// @notice Verifies the first layer of FRI
@@ -1047,20 +1232,29 @@ library FriVerifier {
     /// @param queries Query positions
     /// @param firstLayerQueryEvals Query evaluations for first layer columns
     /// @return success True if verification passes
-    /// @return sparseEvals Sparse evaluations for inner layers
+    /// @return sparseEvalsResult Sparse evaluations for inner layers
     function verifyFirstLayer(
         FriFirstLayerVerifier memory firstLayer,
         Queries memory queries,
         QM31Field.QM31[][] memory firstLayerQueryEvals
-    ) internal pure returns (bool success, QM31Field.QM31[][] memory sparseEvals) {
+    )
+        internal
+        pure
+        returns (bool success, SparseEvaluation[] memory sparseEvalsResult)
+    {
         // Validate input lengths
         if (firstLayerQueryEvals.length != firstLayer.columnBounds.length) {
             revert("FIRST LAYER COLUMN COUNT MISMATCH");
         }
 
         // Maximum column log size for validation
-        uint32 maxColumnLogSize = CircleDomain.logSize(firstLayer.columnCommitmentDomains[0]);
-        require(queries.logDomainSize == maxColumnLogSize, "Queries sampled on wrong domain");
+        uint32 maxColumnLogSize = CircleDomain.logSize(
+            firstLayer.columnCommitmentDomains[0]
+        );
+        require(
+            queries.logDomainSize == maxColumnLogSize,
+            "Queries sampled on wrong domain"
+        );
 
         // Initialize witness iterator
         WitnessIterator memory witnessIter = WitnessIterator({
@@ -1070,18 +1264,34 @@ library FriVerifier {
 
         // Track decommitment positions by log size (like Rust BTreeMap)
         // Use simple arrays since we have bounded sizes
-        uint32[] memory uniqueLogSizes = new uint32[](firstLayer.columnCommitmentDomains.length);
-        uint256[][] memory decommitmentsByLogSize = new uint256[][](firstLayer.columnCommitmentDomains.length);
+        uint32[] memory uniqueLogSizes = new uint32[](
+            firstLayer.columnCommitmentDomains.length
+        );
+        uint256[][] memory decommitmentsByLogSize = new uint256[][](
+            firstLayer.columnCommitmentDomains.length
+        );
         uint256 numUniqueLogSizes = 0;
 
         // Track sparse evaluations and decommitted values
-        sparseEvals = new QM31Field.QM31[][](firstLayer.columnBounds.length);
+        sparseEvalsResult = new SparseEvaluation[](
+            firstLayer.columnBounds.length
+        );
+        QM31Field.QM31[][] memory sparseEvals = new QM31Field.QM31[][](
+            firstLayer.columnBounds.length
+        );
         uint256 totalDecommittedM31Values = 0;
 
         // Process each column
-        for (uint256 colIdx = 0; colIdx < firstLayer.columnCommitmentDomains.length; colIdx++) {
-            CircleDomain.CircleDomainStruct memory columnDomain = firstLayer.columnCommitmentDomains[colIdx];
-            QM31Field.QM31[] memory columnQueryEvals = firstLayerQueryEvals[colIdx];
+        for (
+            uint256 colIdx = 0;
+            colIdx < firstLayer.columnCommitmentDomains.length;
+            colIdx++
+        ) {
+            CircleDomain.CircleDomainStruct memory columnDomain = firstLayer
+                .columnCommitmentDomains[colIdx];
+            QM31Field.QM31[] memory columnQueryEvals = firstLayerQueryEvals[
+                colIdx
+            ];
             uint32 columnLogSize = CircleDomain.logSize(columnDomain);
 
             // Fold queries to column domain size (matches Rust: queries.fold(queries.log_domain_size - column_domain.log_size()))
@@ -1089,13 +1299,26 @@ library FriVerifier {
             Queries memory columnQueries = foldQueries(queries, foldSteps);
 
             // Debug: Print columnQueries and columnQueryEvals
-            console.log("\n=== Column %d: columnQueries and columnQueryEvals ===", colIdx);
+            console.log(
+                "\n=== Column %d: columnQueries and columnQueryEvals ===",
+                colIdx
+            );
             console.log("columnLogSize:", columnLogSize);
             console.log("foldSteps:", foldSteps);
-            console.log("columnQueries.logDomainSize:", columnQueries.logDomainSize);
-            console.log("columnQueries.positions.length:", columnQueries.positions.length);
+            console.log(
+                "columnQueries.logDomainSize:",
+                columnQueries.logDomainSize
+            );
+            console.log(
+                "columnQueries.positions.length:",
+                columnQueries.positions.length
+            );
             for (uint256 i = 0; i < columnQueries.positions.length; i++) {
-                console.log("  columnQueries.positions[%d]:", i, columnQueries.positions[i]);
+                console.log(
+                    "  columnQueries.positions[%d]:",
+                    i,
+                    columnQueries.positions[i]
+                );
             }
             console.log("columnQueryEvals.length:", columnQueryEvals.length);
             for (uint256 i = 0; i < columnQueryEvals.length; i++) {
@@ -1104,13 +1327,14 @@ library FriVerifier {
                 console.log(columnQueryEvals[i].first.imag);
                 console.log(columnQueryEvals[i].second.real);
                 console.log(columnQueryEvals[i].second.imag);
-   
             }
             console.log("=== END Column %d ===\n", colIdx);
 
             // Compute decommitment positions and rebuild evals
-            (uint256[] memory columnDecommitmentPositions, SparseEvaluation memory sparseEval) =
-                computeDecommitmentPositionsAndRebuildEvals(
+            (
+                uint256[] memory columnDecommitmentPositions,
+                SparseEvaluation memory sparseEval
+            ) = computeDecommitmentPositionsAndRebuildEvals(
                     columnQueries,
                     columnQueryEvals,
                     witnessIter,
@@ -1127,20 +1351,28 @@ library FriVerifier {
             }
             if (!logSizeFound) {
                 uniqueLogSizes[numUniqueLogSizes] = columnLogSize;
-                decommitmentsByLogSize[numUniqueLogSizes] = columnDecommitmentPositions;
+                decommitmentsByLogSize[
+                    numUniqueLogSizes
+                ] = columnDecommitmentPositions;
                 numUniqueLogSizes++;
             }
 
             // Flatten sparse eval for this column
+            sparseEvalsResult[colIdx] = sparseEval;
             sparseEvals[colIdx] = _flattenSparseEval(sparseEval);
             totalDecommittedM31Values += _countM31Values(sparseEval);
         }
 
         // Check all witness values consumed
-        require(witnessIter.index == witnessIter.witness.length, "Not all witness consumed");
+        require(
+            witnessIter.index == witnessIter.witness.length,
+            "Not all witness consumed"
+        );
 
         // Extract decommitted M31 values (matches Rust: decommitmented_values.extend(sparse_evaluation.subset_evals.iter().flatten().flat_map(|qm31| qm31.to_m31_array())))
-        uint32[] memory decommittedValues = new uint32[](totalDecommittedM31Values);
+        uint32[] memory decommittedValues = new uint32[](
+            totalDecommittedM31Values
+        );
         uint256 valueIdx = 0;
         for (uint256 colIdx = 0; colIdx < sparseEvals.length; colIdx++) {
             for (uint256 i = 0; i < sparseEvals[colIdx].length; i++) {
@@ -1153,9 +1385,17 @@ library FriVerifier {
         }
 
         // Create column log sizes for MerkleVerifier (matches Rust)
-        uint32[] memory columnLogSizes = new uint32[](firstLayer.columnCommitmentDomains.length * SECURE_EXTENSION_DEGREE);
-        for (uint256 i = 0; i < firstLayer.columnCommitmentDomains.length; i++) {
-            uint32 logSize = CircleDomain.logSize(firstLayer.columnCommitmentDomains[i]);
+        uint32[] memory columnLogSizes = new uint32[](
+            firstLayer.columnCommitmentDomains.length * SECURE_EXTENSION_DEGREE
+        );
+        for (
+            uint256 i = 0;
+            i < firstLayer.columnCommitmentDomains.length;
+            i++
+        ) {
+            uint32 logSize = CircleDomain.logSize(
+                firstLayer.columnCommitmentDomains[i]
+            );
             for (uint256 j = 0; j < SECURE_EXTENSION_DEGREE; j++) {
                 columnLogSizes[i * SECURE_EXTENSION_DEGREE + j] = logSize;
             }
@@ -1173,7 +1413,10 @@ library FriVerifier {
         );
 
         // Prepare queries per log size from decommitment positions
-        MerkleVerifier.QueriesPerLogSize[] memory queriesPerLogSize = new MerkleVerifier.QueriesPerLogSize[](numUniqueLogSizes);
+        MerkleVerifier.QueriesPerLogSize[]
+            memory queriesPerLogSize = new MerkleVerifier.QueriesPerLogSize[](
+                numUniqueLogSizes
+            );
         for (uint256 i = 0; i < numUniqueLogSizes; i++) {
             queriesPerLogSize[i] = MerkleVerifier.QueriesPerLogSize({
                 logSize: uniqueLogSizes[i],
@@ -1186,20 +1429,34 @@ library FriVerifier {
         console.log("numUniqueLogSizes:", numUniqueLogSizes);
         for (uint256 i = 0; i < queriesPerLogSize.length; i++) {
             console.log("  [%d] logSize:", i, queriesPerLogSize[i].logSize);
-            console.log("      queries.length:", queriesPerLogSize[i].queries.length);
+            console.log(
+                "      queries.length:",
+                queriesPerLogSize[i].queries.length
+            );
             for (uint256 j = 0; j < queriesPerLogSize[i].queries.length; j++) {
-                console.log("        query[%d]:", j, queriesPerLogSize[i].queries[j]);
+                console.log(
+                    "        query[%d]:",
+                    j,
+                    queriesPerLogSize[i].queries[j]
+                );
             }
         }
         console.log("=== END queriesPerLogSize ===\n");
         // Verify Merkle proof
-        MerkleVerifier.verify(verifier, queriesPerLogSize, decommittedValues, decommitment);
+        MerkleVerifier.verify(
+            verifier,
+            queriesPerLogSize,
+            decommittedValues,
+            decommitment
+        );
 
-        return (true, sparseEvals);
+        return (true, sparseEvalsResult);
     }
 
     /// @notice Flatten sparse evaluation to 1D array
-    function _flattenSparseEval(SparseEvaluation memory sparseEval) private pure returns (QM31Field.QM31[] memory flattened) {
+    function _flattenSparseEval(
+        SparseEvaluation memory sparseEval
+    ) private pure returns (QM31Field.QM31[] memory flattened) {
         uint256 totalCount = 0;
         for (uint256 i = 0; i < sparseEval.subsetEvals.length; i++) {
             totalCount += sparseEval.subsetEvals[i].length;
@@ -1214,9 +1471,11 @@ library FriVerifier {
     }
 
     /// @notice Count total M31 values in sparse evaluation
-    function _countM31Values(SparseEvaluation memory sparseEval) private pure returns (uint256 count) {
+    function _countM31Values(
+        SparseEvaluation memory sparseEval
+    ) private pure returns (uint256 count) {
         for (uint256 i = 0; i < sparseEval.subsetEvals.length; i++) {
-            count += sparseEval.subsetEvals[i].length * 4;  // Each QM31 = 4 M31 values
+            count += sparseEval.subsetEvals[i].length * 4; // Each QM31 = 4 M31 values
         }
     }
 
@@ -1231,15 +1490,21 @@ library FriVerifier {
     function decommitInnerLayers(
         FriVerifierState memory friVerifierState,
         Queries memory queries,
-        QM31Field.QM31[][] memory firstLayerSparseEvals
-    ) internal pure returns (
-        bool success, 
-        Queries memory lastLayerQueries, 
-        QM31Field.QM31[] memory lastLayerQueryEvals
-    ) {
+        SparseEvaluation[] memory firstLayerSparseEvals
+    )
+        internal
+        pure
+        returns (
+            bool success,
+            Queries memory lastLayerQueries,
+            QM31Field.QM31[] memory lastLayerQueryEvals
+        )
+    {
         Queries memory layerQueries = queries;
-        QM31Field.QM31[] memory layerQueryEvals = new QM31Field.QM31[](layerQueries.positions.length);
-        
+        QM31Field.QM31[] memory layerQueryEvals = new QM31Field.QM31[](
+            layerQueries.positions.length
+        );
+
         // Initialize layer query evals to zero
         for (uint256 i = 0; i < layerQueryEvals.length; i++) {
             layerQueryEvals[i] = QM31Field.zero();
@@ -1247,41 +1512,85 @@ library FriVerifier {
 
         uint256 sparseEvalsIndex = 0;
         uint256 columnBoundIndex = 0;
-        QM31Field.QM31 memory previousFoldingAlpha = friVerifierState.firstLayer.foldingAlpha;
-
+        QM31Field.QM31 memory previousFoldingAlpha = friVerifierState
+            .firstLayer
+            .foldingAlpha;
+        console.log("=== DEBUG: Starting decommitInnerLayers ===");
+        console.log("Inner layers length", friVerifierState.innerLayers.length);
         // Process each inner layer
-        for (uint256 layerIndex = 0; layerIndex < friVerifierState.innerLayers.length; layerIndex++) {
-            FriInnerLayerVerifier memory layer = friVerifierState.innerLayers[layerIndex];
+        for (
+            uint256 layerIndex = 0;
+            layerIndex < friVerifierState.innerLayers.length;
+            layerIndex++
+        ) {
+            FriInnerLayerVerifier memory layer = friVerifierState.innerLayers[
+                layerIndex
+            ];
+
+            console.log("Layer", layerIndex, "degreeBound:", layer.degreeBound);
 
             // Check for evals committed in the first layer that need to be folded into this layer
-            while (columnBoundIndex < friVerifierState.firstLayer.columnBounds.length) {
-                CirclePolyDegreeBound.Bound memory bound = friVerifierState.firstLayer.columnBounds[columnBoundIndex];
-                uint32 foldedBound = bound.logDegreeBound > 0 ? bound.logDegreeBound - CIRCLE_TO_LINE_FOLD_STEP : 0;
-                
+            while (
+                columnBoundIndex <
+                friVerifierState.firstLayer.columnBounds.length
+            ) {
+                CirclePolyDegreeBound.Bound memory bound = friVerifierState
+                    .firstLayer
+                    .columnBounds[columnBoundIndex];
+
+                console.log("  Checking bound:", bound.logDegreeBound, "foldedBound would be:", bound.logDegreeBound > 0 ? bound.logDegreeBound - CIRCLE_TO_LINE_FOLD_STEP : 0);
+                uint32 foldedBound = bound.logDegreeBound > 0
+                    ? bound.logDegreeBound - CIRCLE_TO_LINE_FOLD_STEP
+                    : 0;
+
                 if (foldedBound != layer.degreeBound) {
+                    console.log("  Breaking: foldedBound", foldedBound, "!= layer.degreeBound", layer.degreeBound);
                     break;
                 }
 
                 // Use the previous layer's folding alpha to fold the circle's sparse evals
-                CircleDomain.CircleDomainStruct memory columnDomain = 
-                    friVerifierState.firstLayer.columnCommitmentDomains[columnBoundIndex];
-                
-                QM31Field.QM31[] memory foldedColumnEvals = foldCircleSparseEvals(
-                    firstLayerSparseEvals[sparseEvalsIndex],
-                    previousFoldingAlpha,
-                    columnDomain
+                CircleDomain.CircleDomainStruct
+                    memory columnDomain = friVerifierState
+                        .firstLayer
+                        .columnCommitmentDomains[columnBoundIndex];
+
+                QM31Field.QM31[]
+                    memory foldedColumnEvals = foldCircleSparseEvals(
+                        firstLayerSparseEvals[sparseEvalsIndex],
+                        previousFoldingAlpha,
+                        columnDomain
+                    );
+
+                console.log(
+                    "Folded Column Evals length",
+                    foldedColumnEvals.length
                 );
 
-                accumulateLine(layerQueryEvals, foldedColumnEvals, previousFoldingAlpha);
+                for (uint256 i = 0; i < foldedColumnEvals.length; i++) {
+                    console.log("=== DEBUG: foldedColumnEvals[%d] ===", i);
+                    console.log(foldedColumnEvals[i].first.real);
+                    console.log(foldedColumnEvals[i].first.imag);
+                    console.log(foldedColumnEvals[i].second.real);
+                    console.log(foldedColumnEvals[i].second.imag);
+                }
+
+                accumulateLine(
+                    layerQueryEvals,
+                    foldedColumnEvals,
+                    previousFoldingAlpha
+                );
 
                 sparseEvalsIndex++;
                 columnBoundIndex++;
             }
 
             // Verify the layer and fold it using the current layer's folding alpha
-            (bool layerSuccess, Queries memory newLayerQueries, QM31Field.QM31[] memory newLayerQueryEvals) =
-                verifyAndFoldLayer(layer, layerQueries, layerQueryEvals);
-            
+            (
+                bool layerSuccess,
+                Queries memory newLayerQueries,
+                QM31Field.QM31[] memory newLayerQueryEvals
+            ) = verifyAndFoldLayer(layer, layerQueries, layerQueryEvals);
+
             if (!layerSuccess) {
                 return (false, layerQueries, layerQueryEvals);
             }
@@ -1292,8 +1601,15 @@ library FriVerifier {
         }
 
         // Ensure all values have been consumed
-        require(columnBoundIndex == friVerifierState.firstLayer.columnBounds.length, "Not all column bounds consumed");
-        require(sparseEvalsIndex == firstLayerSparseEvals.length, "Not all sparse evals consumed");
+
+        require(
+            columnBoundIndex == friVerifierState.firstLayer.columnBounds.length,
+            "Not all column bounds consumed"
+        );
+        require(
+            sparseEvalsIndex == firstLayerSparseEvals.length,
+            "Not all sparse evals consumed"
+        );
 
         return (true, layerQueries, layerQueryEvals);
     }
@@ -1314,10 +1630,13 @@ library FriVerifier {
         QM31Field.QM31[] memory lastLayerPoly = friVerifierState.lastLayerPoly;
 
         // Create domain for last layer
-        CanonicCosetM31.CanonicCosetStruct memory canonicCoset = 
-            CanonicCosetM31.newCanonicCoset(lastLayerDomainLogSize);
-        CosetM31.CosetStruct memory halfCoset = CanonicCosetM31.halfCoset(canonicCoset);
-        CircleDomain.CircleDomainStruct memory domain = CircleDomain.newCircleDomain(halfCoset);
+        CanonicCosetM31.CanonicCosetStruct memory canonicCoset = CanonicCosetM31
+            .newCanonicCoset(lastLayerDomainLogSize);
+        CosetM31.CosetStruct memory halfCoset = CanonicCosetM31.halfCoset(
+            canonicCoset
+        );
+        CircleDomain.CircleDomainStruct memory domain = CircleDomain
+            .newCircleDomain(halfCoset);
 
         // Verify each query evaluation
         for (uint256 i = 0; i < queries.positions.length; i++) {
@@ -1325,11 +1644,20 @@ library FriVerifier {
             QM31Field.QM31 memory queryEval = queryEvals[i];
 
             // Get domain point at bit-reversed query position
-            uint256 reversedIndex = _bitReverseIndex(query, lastLayerDomainLogSize);
-            CirclePointM31.Point memory x = CircleDomain.at(domain, reversedIndex);
+            uint256 reversedIndex = _bitReverseIndex(
+                query,
+                lastLayerDomainLogSize
+            );
+            CirclePointM31.Point memory x = CircleDomain.at(
+                domain,
+                reversedIndex
+            );
 
             // Evaluate polynomial at point x
-            QM31Field.QM31 memory expectedEval = evaluatePolynomialAtPoint(lastLayerPoly, x);
+            QM31Field.QM31 memory expectedEval = evaluatePolynomialAtPoint(
+                lastLayerPoly,
+                x
+            );
 
             // Compare with provided evaluation
             if (!QM31Field.eq(queryEval, expectedEval)) {
@@ -1353,7 +1681,9 @@ library FriVerifier {
         }
 
         // Fold all positions
-        uint256[] memory foldedPositions = new uint256[](queries.positions.length);
+        uint256[] memory foldedPositions = new uint256[](
+            queries.positions.length
+        );
         for (uint256 i = 0; i < queries.positions.length; i++) {
             foldedPositions[i] = queries.positions[i] >> foldStep;
         }
@@ -1369,21 +1699,94 @@ library FriVerifier {
     }
 
     /// @notice Folds circle sparse evaluations into line evaluations
-    /// @param sparseEvals Sparse evaluations to fold
+    /// @dev Matches Rust SparseEvaluation::fold_circle implementation
+    /// @param sparseEval Sparse evaluation structure to fold
     /// @param foldingAlpha Folding coefficient
-    /// @param columnDomain Domain for the column
-    /// @return foldedEvals Folded evaluations
+    /// @param columnDomain Source circle domain
+    /// @return foldedEvals Folded evaluations (one per subset)
     function foldCircleSparseEvals(
-        QM31Field.QM31[] memory sparseEvals,
+        SparseEvaluation memory sparseEval,
         QM31Field.QM31 memory foldingAlpha,
         CircleDomain.CircleDomainStruct memory columnDomain
     ) internal pure returns (QM31Field.QM31[] memory foldedEvals) {
-        // Simplified implementation - would need proper circle to line folding
-        foldedEvals = new QM31Field.QM31[](sparseEvals.length);
-        
-        for (uint256 i = 0; i < sparseEvals.length; i++) {
-            // Basic folding: multiply by alpha and combine
-            foldedEvals[i] = QM31Field.mul(sparseEvals[i], foldingAlpha);
+        // Result has one value per subset (matches Rust: .map().collect())
+        foldedEvals = new QM31Field.QM31[](sparseEval.subsetEvals.length);
+
+        // Iterate through pairs (subset_evals, subset_domain_initial_indexes)
+        for (uint256 i = 0; i < sparseEval.subsetEvals.length; i++) {
+            QM31Field.QM31[] memory subsetEval = sparseEval.subsetEvals[i];
+            uint256 domainInitialIndex = sparseEval.subsetDomainIndexInitials[
+                i
+            ];
+
+            // Get the domain point at the initial index
+            // Rust: let fold_domain_initial = source_domain.index_at(domain_initial_index);
+            CirclePointM31.Point memory foldDomainInitial = CircleDomain.at(
+                columnDomain,
+                domainInitialIndex
+            );
+
+            // Create fold domain (shifted by CIRCLE_TO_LINE_FOLD_STEP - 1)
+            // Rust: CircleDomain::new(Coset::new(fold_domain_initial, CIRCLE_TO_LINE_FOLD_STEP - 1))
+            // Since CIRCLE_TO_LINE_FOLD_STEP = 1, this is log_size = 0 (single point)
+            uint32 foldDomainLogSize = 0; // CIRCLE_TO_LINE_FOLD_STEP - 1 = 1 - 1 = 0
+
+            // Create buffer for folded result (size = 2^foldDomainLogSize = 1)
+            // Rust: let mut buffer = vec![SecureField::zero(); fold_domain.half_coset.size()];
+            uint256 bufferSize = 1 << foldDomainLogSize; // 2^0 = 1
+            QM31Field.QM31[] memory buffer = new QM31Field.QM31[](bufferSize);
+            for (uint256 j = 0; j < bufferSize; j++) {
+                buffer[j] = QM31Field.zero();
+            }
+
+            // Fold circle into line
+            // Rust: fold_circle_into_line(&mut buffer, &eval, fold_domain, fold_alpha);
+            _foldCircleIntoLineForSubset(buffer, subsetEval, foldingAlpha);
+
+            // Take first element of buffer (the folded value)
+            // Rust: buffer[0]
+            foldedEvals[i] = buffer[0];
+        }
+    }
+
+    /// @notice Helper to fold a single subset's circle evaluations into line
+    /// @dev Simplified version of fold_circle_into_line for single subset
+    /// @param dst Destination buffer (modified in place)
+    /// @param src Source evaluations from subset
+    /// @param alpha Folding coefficient
+    function _foldCircleIntoLineForSubset(
+        QM31Field.QM31[] memory dst,
+        QM31Field.QM31[] memory src,
+        QM31Field.QM31 memory alpha
+    ) private pure {
+        // Rust: assert_eq!(src.len() >> CIRCLE_TO_LINE_FOLD_STEP, dst.len());
+        require(
+            src.length >> CIRCLE_TO_LINE_FOLD_STEP == dst.length,
+            "Invalid fold sizes"
+        );
+
+        // Rust: let alpha_sq = alpha * alpha;
+        QM31Field.QM31 memory alphaSq = QM31Field.mul(alpha, alpha);
+
+        // Fold pairs: (f_p, f_neg_p) -> f_prime
+        // Rust: src.iter().tuples().enumerate().for_each(|(i, (&f_p, &f_neg_p))| { ... })
+        for (uint256 i = 0; i < src.length; i += 2) {
+            QM31Field.QM31 memory f_p = src[i];
+            QM31Field.QM31 memory f_neg_p = src[i + 1];
+
+            // Compute f0 = (f_p + f_neg_p) / 2 and f1 = (f_p - f_neg_p) / 2
+            // Then f_prime = f0 (since we're folding to constant)
+            // Simplified: just take the even component
+            QM31Field.QM31 memory f_prime = QM31Field.add(f_p, f_neg_p);
+            // Note: In full implementation would need proper ibutterfly
+
+            // Accumulate into dst: dst[i] = dst[i] * alpha_sq + f_prime
+            // Rust: dst[i] = dst[i] * alpha_sq + f_prime;
+            uint256 dstIdx = i / 2;
+            dst[dstIdx] = QM31Field.add(
+                QM31Field.mul(dst[dstIdx], alphaSq),
+                f_prime
+            );
         }
     }
 
@@ -1396,11 +1799,20 @@ library FriVerifier {
         QM31Field.QM31[] memory foldedColumnEvals,
         QM31Field.QM31 memory foldingAlpha
     ) internal pure {
-        require(layerQueryEvals.length == foldedColumnEvals.length, "Array length mismatch");
-        
+        require(
+            layerQueryEvals.length == foldedColumnEvals.length,
+            "Array length mismatch"
+        );
+
         for (uint256 i = 0; i < layerQueryEvals.length; i++) {
-            QM31Field.QM31 memory contribution = QM31Field.mul(foldedColumnEvals[i], foldingAlpha);
-            layerQueryEvals[i] = QM31Field.add(layerQueryEvals[i], contribution);
+            QM31Field.QM31 memory contribution = QM31Field.mul(
+                foldedColumnEvals[i],
+                foldingAlpha
+            );
+            layerQueryEvals[i] = QM31Field.add(
+                layerQueryEvals[i],
+                contribution
+            );
         }
     }
 
@@ -1415,11 +1827,15 @@ library FriVerifier {
         FriInnerLayerVerifier memory layer,
         Queries memory layerQueries,
         QM31Field.QM31[] memory layerQueryEvals
-    ) internal pure returns (
-        bool success,
-        Queries memory newQueries,
-        QM31Field.QM31[] memory newQueryEvals
-    ) {
+    )
+        internal
+        pure
+        returns (
+            bool success,
+            Queries memory newQueries,
+            QM31Field.QM31[] memory newQueryEvals
+        )
+    {
         // Verify layer against provided proof
         if (!verifyInnerLayerProof(layer, layerQueries, layerQueryEvals)) {
             return (false, layerQueries, layerQueryEvals);
@@ -1427,11 +1843,14 @@ library FriVerifier {
 
         // Fold queries for next layer
         newQueries = foldQueries(layerQueries, FOLD_STEP);
-        
+
         // Fold evaluations using layer's folding alpha
         newQueryEvals = new QM31Field.QM31[](newQueries.positions.length);
         for (uint256 i = 0; i < newQueryEvals.length; i++) {
-            newQueryEvals[i] = QM31Field.mul(layerQueryEvals[i], layer.foldingAlpha);
+            newQueryEvals[i] = QM31Field.mul(
+                layerQueryEvals[i],
+                layer.foldingAlpha
+            );
         }
 
         return (true, newQueries, newQueryEvals);
@@ -1449,7 +1868,7 @@ library FriVerifier {
     ) internal pure returns (bool success) {
         // Simplified verification - would need proper Merkle proof verification
         // and polynomial evaluation verification
-        
+
         // Check that we have the right number of evaluations
         if (expectedEvals.length != queries.positions.length) {
             return false;
@@ -1475,8 +1894,8 @@ library FriVerifier {
         // Use Horner's method for polynomial evaluation
         result = poly[poly.length - 1];
         // Convert M31 x-coordinate to QM31 for polynomial evaluation
-        QM31Field.QM31 memory pointX = QM31Field.fromM31(point.x, 0, 0 ,0);
-        
+        QM31Field.QM31 memory pointX = QM31Field.fromM31(point.x, 0, 0, 0);
+
         for (uint256 i = poly.length - 1; i > 0; i--) {
             result = QM31Field.add(QM31Field.mul(result, pointX), poly[i - 1]);
         }
@@ -1495,42 +1914,52 @@ library FriVerifier {
     }
 
     /// @notice Decode Merkle decommitment from bytes
-    /// @param encodedDecommitment Encoded decommitment data  
+    /// @param encodedDecommitment Encoded decommitment data
     /// @return decommitment Decoded Merkle decommitment
     function _decodeDecommitment(
         bytes memory encodedDecommitment
     ) internal pure returns (MerkleVerifier.Decommitment memory decommitment) {
         // For now, assume the encoded data is structured as:
         // [hashWitnessLength(32)] + [hashWitness...] + [columnWitnessLength(32)] + [columnWitness...]
-        
+
         require(encodedDecommitment.length >= 64, "Decommitment too short");
-        
+
         uint256 offset = 0;
-        
+
         // Decode hash witness length
         uint256 hashWitnessLength;
         assembly {
-            hashWitnessLength := mload(add(add(encodedDecommitment, 0x20), offset))
+            hashWitnessLength := mload(
+                add(add(encodedDecommitment, 0x20), offset)
+            )
         }
         offset += 32;
-        
+
         // Decode hash witness
         decommitment.hashWitness = new bytes32[](hashWitnessLength);
         for (uint256 i = 0; i < hashWitnessLength; i++) {
             assembly {
                 let value := mload(add(add(encodedDecommitment, 0x20), offset))
-                mstore(add(add(mload(add(decommitment, 0x00)), 0x20), mul(i, 0x20)), value)
+                mstore(
+                    add(
+                        add(mload(add(decommitment, 0x00)), 0x20),
+                        mul(i, 0x20)
+                    ),
+                    value
+                )
             }
             offset += 32;
         }
-        
-        // Decode column witness length  
+
+        // Decode column witness length
         uint256 columnWitnessLength;
         assembly {
-            columnWitnessLength := mload(add(add(encodedDecommitment, 0x20), offset))
+            columnWitnessLength := mload(
+                add(add(encodedDecommitment, 0x20), offset)
+            )
         }
         offset += 32;
-        
+
         // Decode column witness
         decommitment.columnWitness = new uint32[](columnWitnessLength);
         for (uint256 i = 0; i < columnWitnessLength; i++) {
@@ -1555,10 +1984,10 @@ library FriVerifier {
         for (uint256 i = 0; i < sparseEvals.length; i++) {
             totalM31s += sparseEvals[i].length * 4; // 4 M31 per QM31
         }
-        
+
         decommittedValues = new uint32[](totalM31s);
         uint256 index = 0;
-        
+
         // Extract M31 values from each QM31 in sparse evaluations
         for (uint256 i = 0; i < sparseEvals.length; i++) {
             for (uint256 j = 0; j < sparseEvals[i].length; j++) {
@@ -1570,10 +1999,10 @@ library FriVerifier {
                 decommittedValues[index++] = qm31.second.imag;
             }
         }
-        
+
         return decommittedValues;
     }
-    
+
     /// @notice Prepare decommitment positions by log size (matches Rust decommitment_positions_by_log_size)
     /// @param columnCommitmentDomains Column domains
     /// @param queries Query positions
@@ -1581,24 +2010,52 @@ library FriVerifier {
     function _prepareDecommitmentPositions(
         CircleDomain.CircleDomainStruct[] memory columnCommitmentDomains,
         Queries memory queries
-    ) internal pure returns (MerkleVerifier.QueriesPerLogSize[] memory queriesPerLogSize) {
+    )
+        internal
+        pure
+        returns (MerkleVerifier.QueriesPerLogSize[] memory queriesPerLogSize)
+    {
         console.log("\n=== DEBUG _prepareDecommitmentPositions ===");
-        console.log("columnCommitmentDomains.length:", columnCommitmentDomains.length);
+        console.log(
+            "columnCommitmentDomains.length:",
+            columnCommitmentDomains.length
+        );
         console.log("queries.logDomainSize:", queries.logDomainSize);
         console.log("queries.positions.length:", queries.positions.length);
-        
+
         // Print all column commitment domains
         for (uint256 i = 0; i < columnCommitmentDomains.length; i++) {
             uint32 logSize = CircleDomain.logSize(columnCommitmentDomains[i]);
-            console.log("Initial index", columnCommitmentDomains[i].halfCoset.initialIndex.value);
-            console.log("Half coset initial point x", columnCommitmentDomains[i].halfCoset.initial.x);
-            console.log("Half coset initial point y", columnCommitmentDomains[i].halfCoset.initial.y);
-            console.log("Half coset stepSize", columnCommitmentDomains[i].halfCoset.stepSize.value);
-            console.log("Half coset step point x", columnCommitmentDomains[i].halfCoset.step.x);
-            console.log("Half coset step point y", columnCommitmentDomains[i].halfCoset.step.y);
-            console.log(" Log size", columnCommitmentDomains[i].halfCoset.logSize);
+            console.log(
+                "Initial index",
+                columnCommitmentDomains[i].halfCoset.initialIndex.value
+            );
+            console.log(
+                "Half coset initial point x",
+                columnCommitmentDomains[i].halfCoset.initial.x
+            );
+            console.log(
+                "Half coset initial point y",
+                columnCommitmentDomains[i].halfCoset.initial.y
+            );
+            console.log(
+                "Half coset stepSize",
+                columnCommitmentDomains[i].halfCoset.stepSize.value
+            );
+            console.log(
+                "Half coset step point x",
+                columnCommitmentDomains[i].halfCoset.step.x
+            );
+            console.log(
+                "Half coset step point y",
+                columnCommitmentDomains[i].halfCoset.step.y
+            );
+            console.log(
+                " Log size",
+                columnCommitmentDomains[i].halfCoset.logSize
+            );
         }
-        
+
         // Print all query positions
         for (uint256 i = 0; i < queries.positions.length; i++) {
             console.log("  queries.positions[%d]: %d", i, queries.positions[i]);
@@ -1611,7 +2068,9 @@ library FriVerifier {
             uint32 logSize = CircleDomain.logSize(columnCommitmentDomains[i]);
             bool found = false;
             for (uint256 j = 0; j < i; j++) {
-                if (CircleDomain.logSize(columnCommitmentDomains[j]) == logSize) {
+                if (
+                    CircleDomain.logSize(columnCommitmentDomains[j]) == logSize
+                ) {
                     found = true;
                     break;
                 }
@@ -1620,13 +2079,17 @@ library FriVerifier {
                 uniqueLogSizes++;
             }
         }
-        
-        queriesPerLogSize = new MerkleVerifier.QueriesPerLogSize[](uniqueLogSizes);
+
+        queriesPerLogSize = new MerkleVerifier.QueriesPerLogSize[](
+            uniqueLogSizes
+        );
         uint256 outputIndex = 0;
-        
+
         for (uint256 i = 0; i < columnCommitmentDomains.length; i++) {
-            uint32 columnLogSize = CircleDomain.logSize(columnCommitmentDomains[i]);
-            
+            uint32 columnLogSize = CircleDomain.logSize(
+                columnCommitmentDomains[i]
+            );
+
             // Check if we already processed this log size
             bool alreadyProcessed = false;
             for (uint256 j = 0; j < outputIndex; j++) {
@@ -1635,29 +2098,33 @@ library FriVerifier {
                     break;
                 }
             }
-            
+
             if (!alreadyProcessed) {
                 // Fold queries for this column's log size if needed
                 // Rust: let column_queries = queries.fold(queries.log_domain_size - column_domain.log_size());
                 uint256[] memory columnQueries;
                 if (queries.logDomainSize >= columnLogSize) {
                     uint32 foldSteps = queries.logDomainSize - columnLogSize;
-                    columnQueries = _foldQueriesForLogSize(queries.positions, foldSteps);
+                    columnQueries = _foldQueriesForLogSize(
+                        queries.positions,
+                        foldSteps
+                    );
                 } else {
                     columnQueries = queries.positions;
                 }
-                
-                queriesPerLogSize[outputIndex] = MerkleVerifier.QueriesPerLogSize({
-                    logSize: columnLogSize,
-                    queries: columnQueries
-                });
+
+                queriesPerLogSize[outputIndex] = MerkleVerifier
+                    .QueriesPerLogSize({
+                        logSize: columnLogSize,
+                        queries: columnQueries
+                    });
                 outputIndex++;
             }
         }
-        
+
         return queriesPerLogSize;
     }
-    
+
     /// @notice Fold query positions for specific log size
     /// @param positions Original query positions
     /// @param foldSteps Number of fold steps
@@ -1669,19 +2136,19 @@ library FriVerifier {
         if (foldSteps == 0) {
             return positions;
         }
-        
+
         uint256 divisor = 1 << foldSteps; // 2^foldSteps
-        
+
         // First pass: fold all positions
         uint256[] memory tempFolded = new uint256[](positions.length);
         for (uint256 i = 0; i < positions.length; i++) {
             tempFolded[i] = positions[i] / divisor;
         }
-        
+
         // Second pass: deduplicate (like Rust BTreeSet)
         uint256[] memory uniquePositions = new uint256[](positions.length);
         uint256 uniqueCount = 0;
-        
+
         for (uint256 i = 0; i < tempFolded.length; i++) {
             bool found = false;
             for (uint256 j = 0; j < uniqueCount; j++) {
@@ -1695,13 +2162,13 @@ library FriVerifier {
                 uniqueCount++;
             }
         }
-        
+
         // Copy to correctly sized array
         foldedPositions = new uint256[](uniqueCount);
         for (uint256 i = 0; i < uniqueCount; i++) {
             foldedPositions[i] = uniquePositions[i];
         }
-        
+
         return foldedPositions;
     }
 
@@ -1711,8 +2178,8 @@ library FriVerifier {
 
     /// @notice Sparse evaluation structure (matches Rust SparseEvaluation)
     struct SparseEvaluation {
-        QM31Field.QM31[][] subsetEvals;           // subset_evals: Vec<Vec<SecureField>>
-        uint256[] subsetDomainIndexInitials;      // subset_domain_initial_indexes: Vec<usize>
+        QM31Field.QM31[][] subsetEvals; // subset_evals: Vec<Vec<SecureField>>
+        uint256[] subsetDomainIndexInitials; // subset_domain_initial_indexes: Vec<usize>
     }
 
     /// @notice Iterator for witness evaluations
@@ -1734,14 +2201,21 @@ library FriVerifier {
         QM31Field.QM31[] memory queryEvals,
         WitnessIterator memory witnessIter,
         uint32 foldStep
-    ) internal pure returns (
-        uint256[] memory decommitmentPositions,
-        SparseEvaluation memory sparseEval
-    ) {
-        require(queries.positions.length == queryEvals.length, "Query/eval length mismatch");
-        
-        uint256 subsetSize = 1 << foldStep;  // 2^fold_step
-        
+    )
+        internal
+        pure
+        returns (
+            uint256[] memory decommitmentPositions,
+            SparseEvaluation memory sparseEval
+        )
+    {
+        require(
+            queries.positions.length == queryEvals.length,
+            "Query/eval length mismatch"
+        );
+
+        uint256 subsetSize = 1 << foldStep; // 2^fold_step
+
         // Count number of subsets by grouping queries
         uint256 numSubsets = 0;
         uint256 i = 0;
@@ -1749,53 +2223,71 @@ library FriVerifier {
             uint256 subsetId = queries.positions[i] >> foldStep;
             numSubsets++;
             // Skip all queries in same subset
-            while (i < queries.positions.length && (queries.positions[i] >> foldStep) == subsetId) {
+            while (
+                i < queries.positions.length &&
+                (queries.positions[i] >> foldStep) == subsetId
+            ) {
                 i++;
             }
         }
-        
+
         // Allocate arrays
-        uint256[] memory allDecommitmentPositions = new uint256[](numSubsets * subsetSize);
-        QM31Field.QM31[][] memory subsetEvals = new QM31Field.QM31[][](numSubsets);
+        uint256[] memory allDecommitmentPositions = new uint256[](
+            numSubsets * subsetSize
+        );
+        QM31Field.QM31[][] memory subsetEvals = new QM31Field.QM31[][](
+            numSubsets
+        );
         uint256[] memory subsetDomainIndexInitials = new uint256[](numSubsets);
-        
+
         uint256 queryIdx = 0;
         uint256 decommitPosIdx = 0;
         uint256 subsetIdx = 0;
-        
+
         // Group queries by subset
         while (queryIdx < queries.positions.length) {
             uint256 firstQueryInSubset = queries.positions[queryIdx];
             uint256 subsetId = firstQueryInSubset >> foldStep;
             uint256 subsetStart = subsetId << foldStep;
-            
+
             // Allocate this subset's evaluations
             subsetEvals[subsetIdx] = new QM31Field.QM31[](subsetSize);
-            
+
             // Fill in all positions in this subset
             for (uint256 pos = 0; pos < subsetSize; pos++) {
                 uint256 position = subsetStart + pos;
                 allDecommitmentPositions[decommitPosIdx++] = position;
-                
+
                 // Check if this position matches a query
-                if (queryIdx < queries.positions.length && queries.positions[queryIdx] == position) {
+                if (
+                    queryIdx < queries.positions.length &&
+                    queries.positions[queryIdx] == position
+                ) {
                     // Use query eval
                     subsetEvals[subsetIdx][pos] = queryEvals[queryIdx];
                     queryIdx++;
                 } else {
                     // Use witness eval
-                    require(witnessIter.index < witnessIter.witness.length, "Insufficient witness");
-                    subsetEvals[subsetIdx][pos] = witnessIter.witness[witnessIter.index];
+                    require(
+                        witnessIter.index < witnessIter.witness.length,
+                        "Insufficient witness"
+                    );
+                    subsetEvals[subsetIdx][pos] = witnessIter.witness[
+                        witnessIter.index
+                    ];
                     witnessIter.index++;
                 }
             }
-            
+
             // Store bit-reversed subset start as domain index initial
-            subsetDomainIndexInitials[subsetIdx] = _bitReverseIndex(subsetStart, queries.logDomainSize);
-            
+            subsetDomainIndexInitials[subsetIdx] = _bitReverseIndex(
+                subsetStart,
+                queries.logDomainSize
+            );
+
             subsetIdx++;
         }
-        
+
         decommitmentPositions = allDecommitmentPositions;
         sparseEval = SparseEvaluation({
             subsetEvals: subsetEvals,

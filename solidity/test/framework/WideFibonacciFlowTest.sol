@@ -1122,8 +1122,9 @@ contract WideFibonacciFlowTest is Test {
         FriVerifier.FriProof memory realFriProof = getRealFriProof();
         
         // Populate friVerifier with the actual proof data needed for decommitment
+        // NOTE: Don't create new innerLayers array! That would zero out degreeBound, domainLogSize, etc.
+        // Just update the proof field which was set during commit()
         friVerifier.firstLayer.proof = realFriProof.firstLayer;
-        friVerifier.innerLayers = new FriVerifier.FriInnerLayerVerifier[](realFriProof.innerLayers.length);
         for (uint256 i = 0; i < realFriProof.innerLayers.length; i++) {
             friVerifier.innerLayers[i].proof = realFriProof.innerLayers[i];
         }
