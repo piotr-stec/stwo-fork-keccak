@@ -1171,7 +1171,7 @@ contract WideFibonacciFlowTest is Test {
         for (uint256 i = 0; i < friVerifier.innerLayers.length; i++) {
             console.log("  Inner layer", i, ":");
             console.log("    degree_bound:", friVerifier.innerLayers[i].degreeBound);
-            console.log("    domain_log_size:", friVerifier.innerLayers[i].domainLogSize);
+            console.log("    domain_log_size:", friVerifier.innerLayers[i].domain.logSize);
             console.log("    folding_alpha.first.real:", friVerifier.innerLayers[i].foldingAlpha.first.real);
             console.log("    folding_alpha.first.imag:", friVerifier.innerLayers[i].foldingAlpha.first.imag);
             console.log("    folding_alpha.second.real:", friVerifier.innerLayers[i].foldingAlpha.second.real);
