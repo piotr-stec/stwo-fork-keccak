@@ -96,6 +96,25 @@ library CosetM31 {
         product.value = uint32((uint256(index.value) * scalar) % M31_CIRCLE_ORDER);
     }
 
+    /// @notice Negate circle point index
+    /// @dev Maps to Rust: Self((1 << M31_CIRCLE_LOG_ORDER) - self.0).reduce()
+    /// @param index Index to negate
+    /// @return negated Negated index
+    function negIndex(CirclePointIndex memory index) 
+        internal 
+        pure 
+        returns (CirclePointIndex memory negated) 
+    {
+        // Rust: Self((1 << M31_CIRCLE_LOG_ORDER) - self.0).reduce()
+        // Since M31_CIRCLE_ORDER = 1 << M31_CIRCLE_LOG_ORDER, this is:
+        // (M31_CIRCLE_ORDER - index.value) % M31_CIRCLE_ORDER
+        if (index.value == 0) {
+            negated.value = 0;
+        } else {
+            negated.value = M31_CIRCLE_ORDER - index.value;
+        }
+    }
+
     /// @notice Convert circle point index to actual M31 circle point
     /// @dev Maps to Rust: M31_CIRCLE_GEN.mul(index.value as u128)
     /// @param index Index to convert
@@ -263,6 +282,7 @@ library CosetM31 {
     }
 
     /// @notice Get log size of coset
+    /// @dev Direct access to coset.logSize field is preferred
     /// @param coset Coset to measure
     /// @return logSizeValue Log2 of coset size
     function logSizeFunc(CosetStruct memory coset) internal pure returns (uint32 logSizeValue) {
@@ -320,6 +340,65 @@ library CosetM31 {
             }
         }
         return false;
+    }
+
+    /// @notice Shift coset by adding an offset to initial index
+    /// @dev Maps to Rust: coset.shift(shift_size)
+    /// @param coset Original coset
+    /// @param shiftSize Amount to shift initial index by
+    /// @return shiftedCoset Coset with shifted initial point
+    function shift(CosetStruct memory coset, CirclePointIndex memory shiftSize) 
+        internal 
+        pure 
+        returns (CosetStruct memory shiftedCoset) 
+    {
+        // Rust: let initial_index = self.initial_index + shift_size;
+        CirclePointIndex memory newInitialIndex = addIndices(coset.initialIndex, shiftSize);
+        
+        shiftedCoset = CosetStruct({
+            initialIndex: newInitialIndex,
+            initial: indexToPoint(newInitialIndex),
+            stepSize: coset.stepSize,
+            step: coset.step,
+            logSize: coset.logSize
+        });
+    }
+
+    /// @notice Create conjugate coset: -initial -<step>
+    /// @dev Maps to Rust: coset.conjugate()
+    /// @param coset Original coset
+    /// @return conjugateCoset Conjugate coset
+    function conjugate(CosetStruct memory coset) 
+        internal 
+        pure 
+        returns (CosetStruct memory conjugateCoset) 
+    {
+        // Rust: let initial_index = -self.initial_index;
+        // Rust: let step_size = -self.step_size;
+        CirclePointIndex memory negInitialIndex = negIndex(coset.initialIndex);
+        CirclePointIndex memory negStepSize = negIndex(coset.stepSize);
+        
+        conjugateCoset = CosetStruct({
+            initialIndex: negInitialIndex,
+            initial: indexToPoint(negInitialIndex),
+            stepSize: negStepSize,
+            step: indexToPoint(negStepSize),
+            logSize: coset.logSize
+        });
+    }
+
+    /// @notice Check if two cosets are equal
+    /// @param a First coset
+    /// @param b Second coset
+    /// @return isEqual True if cosets are equal
+    function equal(CosetStruct memory a, CosetStruct memory b) 
+        internal 
+        pure 
+        returns (bool isEqual) 
+    {
+        return (a.initialIndex.value == b.initialIndex.value &&
+                a.stepSize.value == b.stepSize.value &&
+                a.logSize == b.logSize);
     }
 
     /// @notice Get half-sized coset (every second element)

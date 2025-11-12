@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
-import "./Coset.sol";
-import "./CirclePoint.sol";
+import "./CosetM31.sol";
+import "./CirclePointM31.sol";
 import "../fields/QM31Field.sol";
 
 /// @title CircleDomain
@@ -10,17 +10,17 @@ import "../fields/QM31Field.sol";
 /// @dev Valid domains are a disjoint union of two conjugate cosets: +-C + <G_n>
 /// @dev The ordering defined on this domain is C + iG_n, and then -C - iG_n
 library CircleDomain {
-    using Coset for Coset.CosetStruct;
-    using Coset for Coset.CirclePointIndex;
-    using CirclePoint for CirclePoint.Point;
+    using CosetM31 for CosetM31.CosetStruct;
+    using CosetM31 for CosetM31.CirclePointIndex;
+    using CirclePointM31 for CirclePointM31.Point;
 
     /// @notice Maximum log size for circle domain
-    uint32 public constant MAX_CIRCLE_DOMAIN_LOG_SIZE = Coset.M31_CIRCLE_LOG_ORDER - 1;
+    uint32 public constant MAX_CIRCLE_DOMAIN_LOG_SIZE = CosetM31.M31_CIRCLE_LOG_ORDER - 1;
 
     /// @notice Circle domain structure representing +-C + <G_n>
     /// @param halfCoset The coset C that defines the domain +-C + <G_n>
     struct CircleDomainStruct {
-        Coset.CosetStruct halfCoset;
+        CosetM31.CosetStruct halfCoset;
     }
 
     /// @notice Error thrown when log size exceeds maximum
@@ -37,13 +37,13 @@ library CircleDomain {
     /// @dev Given a coset C + <G_n>, constructs the circle domain +-C + <G_n>
     /// @param halfCoset The coset that defines half of the domain
     /// @return domain New circle domain structure
-    function newCircleDomain(Coset.CosetStruct memory halfCoset)
+    function newCircleDomain(CosetM31.CosetStruct memory halfCoset)
         internal
         pure
         returns (CircleDomainStruct memory domain)
     {
-        if (Coset.logSize(halfCoset) >= MAX_CIRCLE_DOMAIN_LOG_SIZE) {
-            revert LogSizeTooLarge(Coset.logSize(halfCoset), MAX_CIRCLE_DOMAIN_LOG_SIZE);
+        if (halfCoset.logSize >= MAX_CIRCLE_DOMAIN_LOG_SIZE) {
+            revert LogSizeTooLarge(halfCoset.logSize, MAX_CIRCLE_DOMAIN_LOG_SIZE);
         }
 
         domain = CircleDomainStruct({
@@ -61,7 +61,7 @@ library CircleDomain {
     function halfCoset(CircleDomainStruct memory domain)
         internal
         pure
-        returns (Coset.CosetStruct memory halfCoset)
+        returns (CosetM31.CosetStruct memory halfCoset)
     {
         halfCoset = domain.halfCoset;
     }
@@ -85,7 +85,7 @@ library CircleDomain {
         pure
         returns (uint32 domainLogSize)
     {
-        domainLogSize = Coset.logSize(domain.halfCoset) + 1;
+        domainLogSize = domain.halfCoset.logSize + 1;
     }
 
     // =============================================================================
@@ -101,10 +101,10 @@ library CircleDomain {
     function at(CircleDomainStruct memory domain, uint256 index)
         internal
         pure
-        returns (CirclePoint.Point memory point)
+        returns (CirclePointM31.Point memory point)
     {
-        Coset.CirclePointIndex memory pointIndex = indexAt(domain, index);
-        point = Coset.indexToPoint(pointIndex);
+        CosetM31.CirclePointIndex memory pointIndex = indexAt(domain, index);
+        point = CosetM31.indexToPoint(pointIndex);
     }
 
     /// @notice Get circle point index at specific position in domain
@@ -114,9 +114,9 @@ library CircleDomain {
     function indexAt(CircleDomainStruct memory domain, uint256 index)
         internal
         pure
-        returns (Coset.CirclePointIndex memory pointIndex)
+        returns (CosetM31.CirclePointIndex memory pointIndex)
     {
-        uint256 halfCosetSize = Coset.size(domain.halfCoset);
+        uint256 halfCosetSize = CosetM31.size(domain.halfCoset);
         
         if (index >= size(domain)) {
             revert IndexOutOfBounds(index, size(domain) - 1);
@@ -124,14 +124,14 @@ library CircleDomain {
 
         if (index < halfCosetSize) {
             // First half: return half_coset[index]
-            pointIndex = Coset.indexAt(domain.halfCoset, index);
+            pointIndex = CosetM31.indexAt(domain.halfCoset, index);
         } else {
             // Second half: return -half_coset[index - half_coset_size]
-            Coset.CirclePointIndex memory halfCosetIndex = Coset.indexAt(
+            CosetM31.CirclePointIndex memory halfCosetIndex = CosetM31.indexAt(
                 domain.halfCoset, 
                 index - halfCosetSize
             );
-            pointIndex = Coset.negIndex(halfCosetIndex);
+            pointIndex = CosetM31.negIndex(halfCosetIndex);
         }
     }
 
@@ -150,8 +150,8 @@ library CircleDomain {
         pure
         returns (bool isCanonic)
     {
-        // Check if half_coset.initial_index * 4 == half_coset.step_size
-        Coset.CirclePointIndex memory initialTimes4 = Coset.mulIndex(
+        // Check if half_CosetM31.initial_index * 4 == half_CosetM31.step_size
+        CosetM31.CirclePointIndex memory initialTimes4 = CosetM31.mulIndex(
             domain.halfCoset.initialIndex,
             4
         );
@@ -166,12 +166,12 @@ library CircleDomain {
     /// @param domain Circle domain to shift
     /// @param shiftSize Amount to shift by
     /// @return shifted Shifted circle domain
-    function shift(CircleDomainStruct memory domain, Coset.CirclePointIndex memory shiftSize)
+    function shift(CircleDomainStruct memory domain, CosetM31.CirclePointIndex memory shiftSize)
         internal
         pure
         returns (CircleDomainStruct memory shifted)
     {
-        Coset.CosetStruct memory shiftedHalfCoset = Coset.shift(domain.halfCoset, shiftSize);
+        CosetM31.CosetStruct memory shiftedHalfCoset = CosetM31.shift(domain.halfCoset, shiftSize);
         shifted = CircleDomainStruct({
             halfCoset: shiftedHalfCoset
         });
@@ -185,14 +185,14 @@ library CircleDomain {
     function split(CircleDomainStruct memory domain, uint32 logParts)
         internal
         pure
-        returns (CircleDomainStruct memory subdomain, Coset.CirclePointIndex[] memory shifts)
+        returns (CircleDomainStruct memory subdomain, CosetM31.CirclePointIndex[] memory shifts)
     {
-        require(logParts <= Coset.logSize(domain.halfCoset), "logParts too large");
+        require(logParts <= domain.halfCoset.logSize, "logParts too large");
 
         // Create subdomain with reduced log size
-        Coset.CosetStruct memory newHalfCoset = Coset.newCoset(
+        CosetM31.CosetStruct memory newHalfCoset = CosetM31.newCoset(
             domain.halfCoset.initialIndex,
-            Coset.logSize(domain.halfCoset) - logParts
+            domain.halfCoset.logSize - logParts
         );
         subdomain = CircleDomainStruct({
             halfCoset: newHalfCoset
@@ -200,9 +200,9 @@ library CircleDomain {
 
         // Generate shift indices
         uint256 numShifts = 1 << logParts;
-        shifts = new Coset.CirclePointIndex[](numShifts);
+        shifts = new CosetM31.CirclePointIndex[](numShifts);
         for (uint256 i = 0; i < numShifts; i++) {
-            shifts[i] = Coset.mulIndex(domain.halfCoset.stepSize, i);
+            shifts[i] = CosetM31.mulIndex(domain.halfCoset.stepSize, i);
         }
     }
 
@@ -217,10 +217,10 @@ library CircleDomain {
     function toArray(CircleDomainStruct memory domain)
         internal
         pure
-        returns (CirclePoint.Point[] memory points)
+        returns (CirclePointM31.Point[] memory points)
     {
         uint256 domainSize = size(domain);
-        points = new CirclePoint.Point[](domainSize);
+        points = new CirclePointM31.Point[](domainSize);
 
         for (uint256 i = 0; i < domainSize; i++) {
             points[i] = at(domain, i);
@@ -236,7 +236,7 @@ library CircleDomain {
         pure
         returns (bool isEqual)
     {
-        isEqual = Coset.equal(a.halfCoset, b.halfCoset);
+        isEqual = CosetM31.equal(a.halfCoset, b.halfCoset);
     }
 
     // =============================================================================
@@ -253,11 +253,11 @@ library CircleDomain {
         returns (bool isValid, string memory errorMessage)
     {
         // Check log size is reasonable
-        if (Coset.logSize(domain.halfCoset) == 0) {
+        if (domain.halfCoset.logSize == 0) {
             return (false, "Half coset log size cannot be zero");
         }
         
-        if (Coset.logSize(domain.halfCoset) >= MAX_CIRCLE_DOMAIN_LOG_SIZE) {
+        if (domain.halfCoset.logSize >= MAX_CIRCLE_DOMAIN_LOG_SIZE) {
             return (false, "Half coset log size exceeds maximum circle domain size");
         }
 
@@ -277,9 +277,9 @@ library CircleDomain {
     function getConjugateHalfCoset(CircleDomainStruct memory domain)
         internal
         pure
-        returns (Coset.CosetStruct memory conjugateCoset)
+        returns (CosetM31.CosetStruct memory conjugateCoset)
     {
-        conjugateCoset = Coset.conjugate(domain.halfCoset);
+        conjugateCoset = CosetM31.conjugate(domain.halfCoset);
     }
 
     /// @notice Check if index is in first half (half coset) or second half (conjugate)
@@ -291,7 +291,7 @@ library CircleDomain {
         pure
         returns (bool inFirstHalf)
     {
-        uint256 halfCosetSize = Coset.size(domain.halfCoset);
+        uint256 halfCosetSize = CosetM31.size(domain.halfCoset);
         inFirstHalf = index < halfCosetSize;
     }
 }

@@ -72,7 +72,7 @@ library CanonicCosetM31 {
         pure 
         returns (uint32 logSizeValue) 
     {
-        logSizeValue = canonicCoset.coset.logSize;
+        logSizeValue = canonicCoset.coset.logSizeFunc();
     }
 
     /// @notice Get size of canonical coset
