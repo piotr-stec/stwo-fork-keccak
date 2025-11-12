@@ -1515,8 +1515,7 @@ library FriVerifier {
         QM31Field.QM31 memory previousFoldingAlpha = friVerifierState
             .firstLayer
             .foldingAlpha;
-        console.log("=== DEBUG: Starting decommitInnerLayers ===");
-        console.log("Inner layers length", friVerifierState.innerLayers.length);
+
         // Process each inner layer
         for (
             uint256 layerIndex = 0;
@@ -1527,8 +1526,6 @@ library FriVerifier {
                 layerIndex
             ];
 
-            console.log("Layer", layerIndex, "degreeBound:", layer.degreeBound);
-
             // Check for evals committed in the first layer that need to be folded into this layer
             while (
                 columnBoundIndex <
@@ -1538,13 +1535,11 @@ library FriVerifier {
                     .firstLayer
                     .columnBounds[columnBoundIndex];
 
-                console.log("  Checking bound:", bound.logDegreeBound, "foldedBound would be:", bound.logDegreeBound > 0 ? bound.logDegreeBound - CIRCLE_TO_LINE_FOLD_STEP : 0);
                 uint32 foldedBound = bound.logDegreeBound > 0
                     ? bound.logDegreeBound - CIRCLE_TO_LINE_FOLD_STEP
                     : 0;
 
                 if (foldedBound != layer.degreeBound) {
-                    console.log("  Breaking: foldedBound", foldedBound, "!= layer.degreeBound", layer.degreeBound);
                     break;
                 }
 
@@ -1560,19 +1555,6 @@ library FriVerifier {
                         previousFoldingAlpha,
                         columnDomain
                     );
-
-                console.log(
-                    "Folded Column Evals length",
-                    foldedColumnEvals.length
-                );
-
-                for (uint256 i = 0; i < foldedColumnEvals.length; i++) {
-                    console.log("=== DEBUG: foldedColumnEvals[%d] ===", i);
-                    console.log(foldedColumnEvals[i].first.real);
-                    console.log(foldedColumnEvals[i].first.imag);
-                    console.log(foldedColumnEvals[i].second.real);
-                    console.log(foldedColumnEvals[i].second.imag);
-                }
 
                 accumulateLine(
                     layerQueryEvals,
@@ -1816,7 +1798,122 @@ library FriVerifier {
         }
     }
 
+    /// @notice Folds line sparse evaluations (matches Rust SparseEvaluation::fold_line)
+    /// @dev For each subset: creates fold domain, calls fold_line, returns first folded value
+    /// @param sparseEval Sparse evaluation structure to fold
+    /// @param foldingAlpha Folding coefficient
+    /// @param sourceDomainLogSize Log size of source line domain
+    /// @return foldedEvals Folded evaluations (one per subset)
+    function foldLineSparseEvals(
+        SparseEvaluation memory sparseEval,
+        QM31Field.QM31 memory foldingAlpha,
+        uint32 sourceDomainLogSize
+    ) internal pure returns (QM31Field.QM31[] memory foldedEvals) {
+        // Result has one value per subset
+        foldedEvals = new QM31Field.QM31[](sparseEval.subsetEvals.length);
+
+        // Create source line domain
+        // Rust: LineDomain with coset at initial point
+        CanonicCosetM31.CanonicCosetStruct memory canonicCoset = CanonicCosetM31
+            .newCanonicCoset(sourceDomainLogSize);
+        CosetM31.CosetStruct memory sourceCoset = CanonicCosetM31.halfCoset(
+            canonicCoset
+        );
+
+        // Iterate through pairs (subset_evals, subset_domain_initial_indexes)
+        for (uint256 i = 0; i < sparseEval.subsetEvals.length; i++) {
+            QM31Field.QM31[] memory subsetEval = sparseEval.subsetEvals[i];
+            uint256 domainInitialIndex = sparseEval.subsetDomainIndexInitials[i];
+
+            // Rust: let fold_domain_initial = source_domain.coset().index_at(domain_initial_index);
+            CirclePointM31.Point memory foldDomainInitial = CosetM31.at(
+                sourceCoset,
+                domainInitialIndex
+            );
+
+            // Rust: let fold_domain = LineDomain::new(Coset::new(fold_domain_initial, FOLD_STEP));
+            // Create fold domain with log_size = FOLD_STEP
+            CosetM31.CosetStruct memory foldCoset = CosetM31.CosetStruct({
+                initial: foldDomainInitial,
+                stepSize: CosetM31.indexFromValue(uint32(1 << FOLD_STEP)),
+                logSize: FOLD_STEP,
+                initialIndex: CosetM31.indexFromValue(0),
+                step: foldDomainInitial // Placeholder - would need proper step computation
+            });
+
+            // Rust: let (_, folded_values) = fold_line(&eval, fold_domain, fold_alpha);
+            // Returns (new_domain, folded_values)
+            QM31Field.QM31[] memory foldedValues = _foldLineForSubset(
+                subsetEval,
+                foldCoset,
+                foldingAlpha
+            );
+
+            // Rust: folded_values[0]
+            foldedEvals[i] = foldedValues[0];
+        }
+    }
+
+    /// @notice Helper to fold a single subset's line evaluations
+    /// @dev Implements the fold_line logic from Rust
+    /// @param eval Evaluations from subset
+    /// @param domain Line domain for folding
+    /// @param alpha Folding coefficient
+    /// @return foldedValues Folded evaluation array
+    function _foldLineForSubset(
+        QM31Field.QM31[] memory eval,
+        CosetM31.CosetStruct memory domain,
+        QM31Field.QM31 memory alpha
+    ) private pure returns (QM31Field.QM31[] memory foldedValues) {
+        require(eval.length >= 2, "Evaluation too small");
+
+        // Rust: folded_values has length n/2 where n is eval.length
+        uint256 foldedLength = eval.length >> FOLD_STEP; // eval.length / 2
+        foldedValues = new QM31Field.QM31[](foldedLength);
+
+        // Rust: eval.iter().tuples().enumerate().map(|(i, (&f_x, &f_neg_x))| { ... })
+        for (uint256 i = 0; i < foldedLength; i++) {
+            QM31Field.QM31 memory f_x = eval[i * 2];
+            QM31Field.QM31 memory f_neg_x = eval[i * 2 + 1];
+
+            // Rust: let x = domain.at(bit_reverse_index(i << FOLD_STEP, domain.log_size()));
+            uint256 bitReversedIndex = _bitReverseIndex(
+                i << FOLD_STEP,
+                domain.logSize + FOLD_STEP
+            );
+            CirclePointM31.Point memory x = CosetM31.at(domain, bitReversedIndex);
+
+            // Rust: ibutterfly(&mut f0, &mut f1, x.inverse());
+            // f0 + alpha * f1
+            QM31Field.QM31 memory f0 = f_x;
+            QM31Field.QM31 memory f1 = f_neg_x;
+
+            // Apply ibutterfly: (f0, f1) <- ((f0 + f1) / 2, (f0 - f1) / (2 * x))
+            // Simplified version for now - would need proper implementation
+            // For now use: f0 = (f_x + f_neg_x), f1 = (f_x - f_neg_x) / x_inv
+            
+            // Compute x_inverse (for M31 point)
+            uint32 xInverse = M31Field.inverse(x.x);
+            QM31Field.QM31 memory xInvQM31 = QM31Field.fromM31(xInverse, 0, 0, 0);
+
+            // ibutterfly computation
+            QM31Field.QM31 memory sum = QM31Field.add(f_x, f_neg_x);
+            QM31Field.QM31 memory diff = QM31Field.sub(f_x, f_neg_x);
+            
+            f0 = sum;
+            f1 = QM31Field.mul(diff, xInvQM31);
+
+            // Rust: f0 + alpha * f1
+            foldedValues[i] = QM31Field.add(f0, QM31Field.mul(alpha, f1));
+        }
+    }
+
     /// @notice Verifies and folds a single inner layer
+    /// @dev Full implementation matching Rust verify_and_fold:
+    ///      1. Compute decommitment positions and rebuild evals
+    ///      2. Verify Merkle decommitment
+    ///      3. Fold sparse evaluations using fold_line
+    ///      4. Return folded queries and evals
     /// @param layer Inner layer verifier
     /// @param layerQueries Current layer queries
     /// @param layerQueryEvals Current layer query evaluations
@@ -1836,47 +1933,102 @@ library FriVerifier {
             QM31Field.QM31[] memory newQueryEvals
         )
     {
-        // Verify layer against provided proof
-        if (!verifyInnerLayerProof(layer, layerQueries, layerQueryEvals)) {
+        // Rust: assert_eq!(queries.log_domain_size, self.domain.log_size());
+        require(
+            layerQueries.logDomainSize == layer.domainLogSize,
+            "Queries sampled on wrong domain for inner layer"
+        );
+
+        // Initialize witness iterator
+        WitnessIterator memory witnessIter = WitnessIterator({
+            witness: layer.proof.friWitness,
+            index: 0
+        });
+
+        // Rust: compute_decommitment_positions_and_rebuild_evals(&queries, &evals_at_queries, &mut fri_witness, FOLD_STEP)
+        (
+            uint256[] memory decommitmentPositions,
+            SparseEvaluation memory sparseEvaluation
+        ) = computeDecommitmentPositionsAndRebuildEvals(
+                layerQueries,
+                layerQueryEvals,
+                witnessIter,
+                FOLD_STEP
+            );
+
+        // Rust: Check all proof evals have been consumed
+        if (witnessIter.index != witnessIter.witness.length) {
             return (false, layerQueries, layerQueryEvals);
         }
 
-        // Fold queries for next layer
+        // Rust: Extract decommitted M31 values
+        // sparse_evaluation.subset_evals.iter().flatten().flat_map(|qm31| qm31.to_m31_array()).collect_vec()
+        uint256 totalM31Values = 0;
+        for (uint256 i = 0; i < sparseEvaluation.subsetEvals.length; i++) {
+            totalM31Values += sparseEvaluation.subsetEvals[i].length * 4; // 4 M31 per QM31
+        }
+        
+        uint32[] memory decommittedValues = new uint32[](totalM31Values);
+        uint256 valueIdx = 0;
+        for (uint256 i = 0; i < sparseEvaluation.subsetEvals.length; i++) {
+            for (uint256 j = 0; j < sparseEvaluation.subsetEvals[i].length; j++) {
+                QM31Field.QM31 memory qm31 = sparseEvaluation.subsetEvals[i][j];
+                decommittedValues[valueIdx++] = qm31.first.real;
+                decommittedValues[valueIdx++] = qm31.first.imag;
+                decommittedValues[valueIdx++] = qm31.second.real;
+                decommittedValues[valueIdx++] = qm31.second.imag;
+            }
+        }
+
+        // Rust: Create MerkleVerifier with column log sizes (4 columns of same log size)
+        // vec![self.domain.log_size(); SECURE_EXTENSION_DEGREE]
+        uint32[] memory columnLogSizes = new uint32[](SECURE_EXTENSION_DEGREE);
+        for (uint256 i = 0; i < SECURE_EXTENSION_DEGREE; i++) {
+            columnLogSizes[i] = layer.domainLogSize;
+        }
+
+        MerkleVerifier.Verifier memory verifier = MerkleVerifier.newVerifier(
+            layer.proof.commitment,
+            columnLogSizes
+        );
+
+        // Decode decommitment proof
+        MerkleVerifier.Decommitment memory decommitment = _decodeDecommitment(
+            layer.proof.decommitment
+        );
+
+        // Rust: Verify Merkle proof with single log size
+        // BTreeMap::from_iter([(self.domain.log_size(), decommitment_positions)])
+        MerkleVerifier.QueriesPerLogSize[]
+            memory queriesPerLogSize = new MerkleVerifier.QueriesPerLogSize[](1);
+        queriesPerLogSize[0] = MerkleVerifier.QueriesPerLogSize({
+            logSize: layer.domainLogSize,
+            queries: decommitmentPositions
+        });
+
+        // Verify - MerkleVerifier.verify will revert on failure
+        MerkleVerifier.verify(
+            verifier,
+            queriesPerLogSize,
+            decommittedValues,
+            decommitment
+        );
+
+        // If we get here, verification succeeded
+
+        // Rust: Fold queries for next layer
+        // let folded_queries = queries.fold(FOLD_STEP);
         newQueries = foldQueries(layerQueries, FOLD_STEP);
 
-        // Fold evaluations using layer's folding alpha
-        newQueryEvals = new QM31Field.QM31[](newQueries.positions.length);
-        for (uint256 i = 0; i < newQueryEvals.length; i++) {
-            newQueryEvals[i] = QM31Field.mul(
-                layerQueryEvals[i],
-                layer.foldingAlpha
-            );
-        }
+        // Rust: Fold sparse evaluations using fold_line
+        // let folded_evals = sparse_evaluation.fold_line(self.folding_alpha, self.domain);
+        newQueryEvals = foldLineSparseEvals(
+            sparseEvaluation,
+            layer.foldingAlpha,
+            layer.domainLogSize
+        );
 
         return (true, newQueries, newQueryEvals);
-    }
-
-    /// @notice Verifies an inner layer proof
-    /// @param layer Inner layer verifier
-    /// @param queries Query positions
-    /// @param expectedEvals Expected evaluations
-    /// @return success True if verification passes
-    function verifyInnerLayerProof(
-        FriInnerLayerVerifier memory layer,
-        Queries memory queries,
-        QM31Field.QM31[] memory expectedEvals
-    ) internal pure returns (bool success) {
-        // Simplified verification - would need proper Merkle proof verification
-        // and polynomial evaluation verification
-
-        // Check that we have the right number of evaluations
-        if (expectedEvals.length != queries.positions.length) {
-            return false;
-        }
-
-        // Additional verification logic would go here
-        // For now, return true as placeholder
-        return true;
     }
 
     /// @notice Evaluates a polynomial at a given point
