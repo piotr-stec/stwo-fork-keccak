@@ -83,9 +83,15 @@ library FriVerifier {
     /// @param foldingAlpha Random folding coefficient from channel
     /// @param layerIndex Index of this layer (for error reporting)
     /// @param proof Layer proof data
+    /// @notice Inner layer verifier state (matches Rust FriInnerLayerVerifier)
+    /// @param degreeBound Degree bound for this layer
+    /// @param domain Line domain for this layer (full coset, not just log size)
+    /// @param foldingAlpha Folding alpha for this layer
+    /// @param layerIndex Index of this layer
+    /// @param proof Proof data for this layer
     struct FriInnerLayerVerifier {
         uint32 degreeBound;
-        uint32 domainLogSize;
+        CosetM31.CosetStruct domain;  // Changed from domainLogSize to full domain
         QM31Field.QM31 foldingAlpha;
         uint256 layerIndex;
         FriLayerProof proof;
@@ -237,6 +243,9 @@ library FriVerifier {
         uint32 layerBound = columnBounds[0].logDegreeBound -
             CIRCLE_TO_LINE_FOLD_STEP;
         uint32 layerDomainLogSize = layerBound + config.logBlowupFactor;
+        
+        // Rust: let mut layer_domain = LineDomain::new(Coset::half_odds(layer_bound + blowup));
+        CosetM31.CosetStruct memory layerDomain = CosetM31.halfOdds(layerDomainLogSize);
 
         for (uint256 i = 0; i < proof.innerLayers.length; i++) {
             // Mix layer commitment into channel
@@ -249,7 +258,7 @@ library FriVerifier {
             // Create inner layer verifier
             innerLayers[i] = FriInnerLayerVerifier({
                 degreeBound: layerBound,
-                domainLogSize: layerDomainLogSize,
+                domain: layerDomain,
                 foldingAlpha: channelState.drawSecureFelt(),
                 layerIndex: i,
                 proof: proof.innerLayers[i]
@@ -261,6 +270,9 @@ library FriVerifier {
             }
             layerBound -= FOLD_STEP;
             layerDomainLogSize = layerBound + config.logBlowupFactor;
+            
+            // Rust: layer_domain = layer_domain.double();
+            layerDomain = CosetM31.double(layerDomain);
         }
 
         // Verify final layer bound matches config
@@ -1802,23 +1814,19 @@ library FriVerifier {
     /// @dev For each subset: creates fold domain, calls fold_line, returns first folded value
     /// @param sparseEval Sparse evaluation structure to fold
     /// @param foldingAlpha Folding coefficient
-    /// @param sourceDomainLogSize Log size of source line domain
+    /// @param sourceDomain Source line domain (coset)
     /// @return foldedEvals Folded evaluations (one per subset)
     function foldLineSparseEvals(
         SparseEvaluation memory sparseEval,
         QM31Field.QM31 memory foldingAlpha,
-        uint32 sourceDomainLogSize
+        CosetM31.CosetStruct memory sourceDomain
     ) internal pure returns (QM31Field.QM31[] memory foldedEvals) {
         // Result has one value per subset
         foldedEvals = new QM31Field.QM31[](sparseEval.subsetEvals.length);
 
-        // Create source line domain
-        // Rust: LineDomain with coset at initial point
-        CanonicCosetM31.CanonicCosetStruct memory canonicCoset = CanonicCosetM31
-            .newCanonicCoset(sourceDomainLogSize);
-        CosetM31.CosetStruct memory sourceCoset = CanonicCosetM31.halfCoset(
-            canonicCoset
-        );
+        // Use the provided source domain directly
+        // Rust: LineDomain wraps a Coset
+        CosetM31.CosetStruct memory sourceCoset = sourceDomain;
 
         // Iterate through pairs (subset_evals, subset_domain_initial_indexes)
         for (uint256 i = 0; i < sparseEval.subsetEvals.length; i++) {
@@ -1826,20 +1834,23 @@ library FriVerifier {
             uint256 domainInitialIndex = sparseEval.subsetDomainIndexInitials[i];
 
             // Rust: let fold_domain_initial = source_domain.coset().index_at(domain_initial_index);
-            CirclePointM31.Point memory foldDomainInitial = CosetM31.at(
+            // This returns CirclePointIndex, not a point!
+            CosetM31.CirclePointIndex memory foldDomainInitialIndex = CosetM31.indexAt(
                 sourceCoset,
                 domainInitialIndex
             );
 
             // Rust: let fold_domain = LineDomain::new(Coset::new(fold_domain_initial, FOLD_STEP));
-            // Create fold domain with log_size = FOLD_STEP
-            CosetM31.CosetStruct memory foldCoset = CosetM31.CosetStruct({
-                initial: foldDomainInitial,
-                stepSize: CosetM31.indexFromValue(uint32(1 << FOLD_STEP)),
-                logSize: FOLD_STEP,
-                initialIndex: CosetM31.indexFromValue(0),
-                step: foldDomainInitial // Placeholder - would need proper step computation
-            });
+            // Coset::new creates a coset with:
+            //   - initial_index = fold_domain_initial
+            //   - step_size = CirclePointIndex::subgroup_gen(FOLD_STEP)
+            //   - initial = initial_index.to_point()
+            //   - step = step_size.to_point()
+            console.log("Folda domain initial index x:", foldDomainInitialIndex.value);
+            CosetM31.CosetStruct memory foldCoset = CosetM31.newCoset(
+                foldDomainInitialIndex,
+                FOLD_STEP
+            );
 
             // Rust: let (_, folded_values) = fold_line(&eval, fold_domain, fold_alpha);
             // Returns (new_domain, folded_values)
@@ -1933,9 +1944,10 @@ library FriVerifier {
             QM31Field.QM31[] memory newQueryEvals
         )
     {
+
         // Rust: assert_eq!(queries.log_domain_size, self.domain.log_size());
         require(
-            layerQueries.logDomainSize == layer.domainLogSize,
+            layerQueries.logDomainSize == layer.domain.logSize,
             "Queries sampled on wrong domain for inner layer"
         );
 
@@ -1984,7 +1996,7 @@ library FriVerifier {
         // vec![self.domain.log_size(); SECURE_EXTENSION_DEGREE]
         uint32[] memory columnLogSizes = new uint32[](SECURE_EXTENSION_DEGREE);
         for (uint256 i = 0; i < SECURE_EXTENSION_DEGREE; i++) {
-            columnLogSizes[i] = layer.domainLogSize;
+            columnLogSizes[i] = layer.domain.logSize;
         }
 
         MerkleVerifier.Verifier memory verifier = MerkleVerifier.newVerifier(
@@ -2002,7 +2014,7 @@ library FriVerifier {
         MerkleVerifier.QueriesPerLogSize[]
             memory queriesPerLogSize = new MerkleVerifier.QueriesPerLogSize[](1);
         queriesPerLogSize[0] = MerkleVerifier.QueriesPerLogSize({
-            logSize: layer.domainLogSize,
+            logSize: layer.domain.logSize,
             queries: decommitmentPositions
         });
 
@@ -2025,7 +2037,7 @@ library FriVerifier {
         newQueryEvals = foldLineSparseEvals(
             sparseEvaluation,
             layer.foldingAlpha,
-            layer.domainLogSize
+            layer.domain
         );
 
         return (true, newQueries, newQueryEvals);
