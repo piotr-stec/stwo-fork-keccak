@@ -10,6 +10,7 @@ import "../core/CirclePoint.sol";
 import "../core/CirclePointM31.sol";
 import "../fields/QM31Field.sol";
 import "../fields/CM31Field.sol";
+import "../fields/M31Field.sol";
 import "forge-std/console.sol";
 import "../channel/IChannel.sol";
 import "../libraries/KeccakChannelLib.sol";
@@ -60,6 +61,7 @@ library FriVerifier {
         FriInnerLayerVerifier[] innerLayers;
         uint32 lastLayerDomainLogSize;
         QM31Field.QM31[] lastLayerPoly;
+        CosetM31.CosetStruct lastLayerDomain;
         Queries queries; // Set when queries are sampled
         QueryPositionsByLogSize queryPositionsByLogSize;
         bool queriesSampled;
@@ -244,8 +246,11 @@ library FriVerifier {
             CIRCLE_TO_LINE_FOLD_STEP;
         uint32 layerDomainLogSize = layerBound + config.logBlowupFactor;
         
-        // Rust: let mut layer_domain = LineDomain::new(Coset::half_odds(layer_bound + blowup));
+  
+        
         CosetM31.CosetStruct memory layerDomain = CosetM31.halfOdds(layerDomainLogSize);
+        
+ 
 
         for (uint256 i = 0; i < proof.innerLayers.length; i++) {
             // Mix layer commitment into channel
@@ -271,8 +276,8 @@ library FriVerifier {
             layerBound -= FOLD_STEP;
             layerDomainLogSize = layerBound + config.logBlowupFactor;
             
-            // Rust: layer_domain = layer_domain.double();
             layerDomain = CosetM31.double(layerDomain);
+  
         }
 
         // Verify final layer bound matches config
@@ -295,6 +300,7 @@ library FriVerifier {
             firstLayer: firstLayer,
             innerLayers: innerLayers,
             lastLayerDomainLogSize: layerDomainLogSize,
+            lastLayerDomain: layerDomain,
             lastLayerPoly: proof.lastLayerPoly,
             queries: Queries({positions: new uint256[](0), logDomainSize: 0}),
             queryPositionsByLogSize: QueryPositionsByLogSize({
@@ -1129,29 +1135,6 @@ library FriVerifier {
             revert("Queries not sampled");
         }
 
-        console.log(
-            "=== FriVerifier.decommit: queries going to decommitOnQueries ==="
-        );
-        console.log(
-            "queries.logDomainSize:",
-            friVerifierState.queries.logDomainSize
-        );
-        console.log(
-            "queries.positions.length:",
-            friVerifierState.queries.positions.length
-        );
-        for (
-            uint256 i = 0;
-            i < friVerifierState.queries.positions.length;
-            i++
-        ) {
-            console.log(
-                "  query[%d]:",
-                i,
-                friVerifierState.queries.positions[i]
-            );
-        }
-
         return
             decommitOnQueries(
                 friVerifierState,
@@ -1205,11 +1188,11 @@ library FriVerifier {
         }
         
 
-        // // Step 4: Verify last layer
-        // bool lastLayerSuccess = decommitLastLayer(friVerifierState, lastLayerQueries, lastLayerQueryEvals);
-        // if (!lastLayerSuccess) {
-        //     revert("FRI decommit failed at STEP 4: Last layer verification failed");
-        // }
+        // Step 4: Verify last layer
+        bool lastLayerSuccess = decommitLastLayer(friVerifierState, lastLayerQueries, lastLayerQueryEvals);
+        if (!lastLayerSuccess) {
+            revert("FRI decommit failed at STEP 4: Last layer verification failed");
+        }
 
         return true;
     }
@@ -1610,6 +1593,7 @@ library FriVerifier {
 
     /// @notice Verifies the last layer
     /// @dev Evaluates the last layer polynomial at query positions and compares with expected values
+    /// @dev Matches Rust decommit_last_layer: uses LineDomain.at() which returns x-coordinate (M31)
     /// @param friVerifierState FRI verifier state
     /// @param queries Query positions for last layer
     /// @param queryEvals Expected query evaluations
@@ -1620,37 +1604,45 @@ library FriVerifier {
         QM31Field.QM31[] memory queryEvals
     ) internal pure returns (bool success) {
         // Get last layer domain and polynomial
+        // Rust: let Self { last_layer_domain: domain, last_layer_poly, .. } = self;
         uint32 lastLayerDomainLogSize = friVerifierState.lastLayerDomainLogSize;
         QM31Field.QM31[] memory lastLayerPoly = friVerifierState.lastLayerPoly;
 
-        // Create domain for last layer
-        CanonicCosetM31.CanonicCosetStruct memory canonicCoset = CanonicCosetM31
-            .newCanonicCoset(lastLayerDomainLogSize);
-        CosetM31.CosetStruct memory halfCoset = CanonicCosetM31.halfCoset(
-            canonicCoset
-        );
-        CircleDomain.CircleDomainStruct memory domain = CircleDomain
-            .newCircleDomain(halfCoset);
+        // Create line domain for last layer (matches Rust LineDomain)
+        CosetM31.CosetStruct memory domain = friVerifierState.lastLayerDomain;
+
+        console.log("Debug domain");
+        console.log("Domain initial index", domain.initialIndex.value);
+        console.log("Domain initial x", domain.initial.x);
+        console.log("Domain initial y", domain.initial.y);
+
+
 
         // Verify each query evaluation
+        // Rust: for (&query, query_eval) in zip(&*queries, query_evals)
         for (uint256 i = 0; i < queries.positions.length; i++) {
             uint256 query = queries.positions[i];
             QM31Field.QM31 memory queryEval = queryEvals[i];
 
             // Get domain point at bit-reversed query position
+            // Rust: let x = domain.at(bit_reverse_index(query, domain.log_size()));
+            // Note: LineDomain.at() returns BaseField (M31), not CirclePoint!
+            // LineDomain.at(i) = self.coset.at(i).x
             uint256 reversedIndex = _bitReverseIndex(
                 query,
                 lastLayerDomainLogSize
             );
-            CirclePointM31.Point memory x = CircleDomain.at(
-                domain,
-                reversedIndex
-            );
+            CirclePointM31.Point memory circlePoint = CosetM31.at(domain, reversedIndex);
+            uint32 x = circlePoint.x; // Extract x-coordinate (M31)
+
+            // Convert M31 to QM31 (matches Rust x.into())
+            QM31Field.QM31 memory xAsQM31 = QM31Field.fromM31(x, 0, 0, 0);
 
             // Evaluate polynomial at point x
+            // Rust: if query_eval != last_layer_poly.eval_at_point(x.into())
             QM31Field.QM31 memory expectedEval = evaluatePolynomialAtPoint(
                 lastLayerPoly,
-                x
+                xAsQM31
             );
 
             // Compare with provided evaluation
@@ -1846,7 +1838,6 @@ library FriVerifier {
             //   - step_size = CirclePointIndex::subgroup_gen(FOLD_STEP)
             //   - initial = initial_index.to_point()
             //   - step = step_size.to_point()
-            console.log("Folda domain initial index x:", foldDomainInitialIndex.value);
             CosetM31.CosetStruct memory foldCoset = CosetM31.newCoset(
                 foldDomainInitialIndex,
                 FOLD_STEP
@@ -2043,25 +2034,25 @@ library FriVerifier {
         return (true, newQueries, newQueryEvals);
     }
 
-    /// @notice Evaluates a polynomial at a given point
-    /// @param poly Polynomial coefficients
-    /// @param point Evaluation point
+    /// @notice Evaluates a polynomial at a given point using Horner's method
+    /// @dev Matches Rust LinePoly.eval_at_point(x: SecureField)
+    /// @param poly Polynomial coefficients in standard order
+    /// @param x Evaluation point (QM31)
     /// @return result Polynomial evaluation result
     function evaluatePolynomialAtPoint(
         QM31Field.QM31[] memory poly,
-        CirclePointM31.Point memory point
+        QM31Field.QM31 memory x
     ) internal pure returns (QM31Field.QM31 memory result) {
         if (poly.length == 0) {
             return QM31Field.zero();
         }
 
-        // Use Horner's method for polynomial evaluation
+        // Use Horner's method: p(x) = a₀ + x(a₁ + x(a₂ + ...))
+        // Rust equivalent: coefficients are evaluated from highest to lowest degree
         result = poly[poly.length - 1];
-        // Convert M31 x-coordinate to QM31 for polynomial evaluation
-        QM31Field.QM31 memory pointX = QM31Field.fromM31(point.x, 0, 0, 0);
 
         for (uint256 i = poly.length - 1; i > 0; i--) {
-            result = QM31Field.add(QM31Field.mul(result, pointX), poly[i - 1]);
+            result = QM31Field.add(QM31Field.mul(result, x), poly[i - 1]);
         }
     }
 
