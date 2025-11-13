@@ -29,10 +29,8 @@ library CommitmentSchemeVerifierLib {
     /// @param trees TreeVec of Merkle verifiers for each commitment tree
     /// @param config PCS configuration (FRI + PoW parameters)
     struct VerifierState {
-        TreeVec.Bytes32TreeVec treeRoots;           // Commitment tree roots
-        TreeVec.Uint32ArrayTreeVec columnLogSizes;  // Column log sizes per tree
+        MerkleVerifier.Verifier merkleVerifier;    // Multi-tree Merkle verifier
         PcsConfig.Config config;                    // PCS configuration
-        uint256 nTrees;                             // Number of commitment trees
     }
 
     /// @notice Commitment scheme proof structure
@@ -64,25 +62,42 @@ library CommitmentSchemeVerifierLib {
     event VerificationStarted(bytes32 indexed proofHash);
     event VerificationCompleted(bool indexed success);
 
-    /// @notice Initialize verifier state with configuration
+    /// @notice Initialize verifier state with configuration and trees
     /// @param state Verifier state to initialize
     /// @param config PCS configuration
-    function initialize(VerifierState storage state, PcsConfig.Config memory config) internal {
+    /// @param treeRoots Array of Merkle tree roots (from proof commitments)
+    /// @param treeColumnLogSizes Array of column log sizes arrays (one per tree)
+    function initialize(
+        VerifierState storage state, 
+        PcsConfig.Config memory config,
+        bytes32[] memory treeRoots,
+        uint32[][] memory treeColumnLogSizes
+    ) internal {
+        require(PcsConfig.isValidConfig(config), "Invalid PCS configuration");
+        require(treeRoots.length == treeColumnLogSizes.length, "Mismatched trees and column sizes");
+        
+        state.config = config;
+        
+        // Create Merkle verifier with all trees
+        state.merkleVerifier = MerkleVerifier.newVerifier(treeRoots, treeColumnLogSizes);
+    }
+    
+    /// @notice Initialize verifier state with configuration only (for incremental tree addition)
+    /// @param state Verifier state to initialize
+    /// @param config PCS configuration
+    function initializeEmpty(VerifierState storage state, PcsConfig.Config memory config) internal {
         require(PcsConfig.isValidConfig(config), "Invalid PCS configuration");
         
         state.config = config;
-        state.treeRoots = TreeVec.newBytes32();
-        state.columnLogSizes = TreeVec.newUint32Array();
-        state.nTrees = 0;
+        // Initialize empty merkle verifier (trees will be added via commit)
+        delete state.merkleVerifier;
     }
 
     /// @notice Clear verifier state after verification
     /// @param state Verifier state to clear
     function clearState(VerifierState storage state) internal {
-        // Clear all trees and reset counters
-        delete state.treeRoots;
-        delete state.columnLogSizes;
-        state.nTrees = 0;
+        // Clear merkle verifier
+        delete state.merkleVerifier;
         // Keep config for reuse
     }
 
@@ -100,19 +115,27 @@ library CommitmentSchemeVerifierLib {
         // Mix commitment root into channel
         channelState.mixRoot(channelState.digest, commitment);
         
-        // Store original log sizes (bounds calculation needs original sizes)
-        // Extended sizes are calculated when needed for other operations
-        
-        // Add to verifier state
-        state.treeRoots = state.treeRoots.push(commitment);
+        // Calculate extended log sizes (add blowup factor)
         uint32[] memory extendedLogSizes = new uint32[](logSizes.length);
         for (uint256 i = 0; i < logSizes.length; i++) {
             extendedLogSizes[i] = logSizes[i] + state.config.friConfig.logBlowupFactor;
         }
-        state.columnLogSizes = state.columnLogSizes.push(extendedLogSizes);
-        state.nTrees++;
         
-        // emit CommitmentAdded(state.nTrees - 1, commitment);
+        // Create new tree and add to verifier
+        MerkleVerifier.MerkleTree memory newTree = MerkleVerifier.createMerkleTree(
+            commitment,
+            extendedLogSizes
+        );
+        
+        // Add tree to verifier (expand trees array)
+        uint256 currentLength = state.merkleVerifier.trees.length;
+        MerkleVerifier.MerkleTree[] memory newTrees = new MerkleVerifier.MerkleTree[](currentLength + 1);
+        for (uint256 i = 0; i < currentLength; i++) {
+            newTrees[i] = state.merkleVerifier.trees[i];
+        }
+        newTrees[currentLength] = newTree;
+        state.merkleVerifier.trees = newTrees;
+        
     }
 
     /// @notice Verify commitment scheme proof
@@ -169,7 +192,7 @@ library CommitmentSchemeVerifierLib {
     /// @param state Verifier state
     /// @param proof Proof to validate
     function _validateProofStructure(VerifierState storage state, Proof calldata proof) private view {
-        if (proof.commitments.length != state.nTrees) {
+        if (proof.commitments.length != state.merkleVerifier.trees.length) {
             revert InvalidProofStructure("Commitment count mismatch");
         }
         
@@ -177,7 +200,7 @@ library CommitmentSchemeVerifierLib {
             revert InvalidProofStructure("Empty sampled values");
         }
         
-        if (proof.decommitments.length != state.nTrees) {
+        if (proof.decommitments.length != state.merkleVerifier.trees.length) {
             revert InvalidProofStructure("Decommitment count mismatch");
         }
     }
@@ -364,7 +387,7 @@ library CommitmentSchemeVerifierLib {
     /// @param state Verifier state
     /// @return Number of trees
     function getTreeCount(VerifierState storage state) internal view returns (uint256) {
-        return state.nTrees;
+        return state.merkleVerifier.trees.length;
     }
 
     /// @notice Get tree root by index
@@ -372,7 +395,8 @@ library CommitmentSchemeVerifierLib {
     /// @param index Tree index
     /// @return Tree root hash
     function getTreeRoot(VerifierState storage state, uint256 index) internal view returns (bytes32) {
-        return state.treeRoots.get(index);
+        require(index < state.merkleVerifier.trees.length, "Tree index out of bounds");
+        return state.merkleVerifier.trees[index].root;
     }
 
     /// @notice Get column log sizes for tree
@@ -380,7 +404,20 @@ library CommitmentSchemeVerifierLib {
     /// @param index Tree index
     /// @return Column log sizes
     function getColumnLogSizes(VerifierState storage state, uint256 index) internal view returns (uint32[] memory) {
-        return state.columnLogSizes.get(index);
+        require(index < state.merkleVerifier.trees.length, "Tree index out of bounds");
+        return state.merkleVerifier.trees[index].columnLogSizes;
+    }
+
+    /// @notice Get column log sizes for all trees (matches Rust column_log_sizes)
+    /// @dev Maps to Rust: self.trees.as_ref().map(|tree| tree.column_log_sizes.clone())
+    /// @param state Verifier state
+    /// @return Array of column log sizes arrays (one per tree)
+    function columnLogSizes(VerifierState storage state) internal view returns (uint32[][] memory) {
+        uint32[][] memory result = new uint32[][](state.merkleVerifier.trees.length);
+        for (uint256 i = 0; i < state.merkleVerifier.trees.length; i++) {
+            result[i] = state.merkleVerifier.trees[i].columnLogSizes;
+        }
+        return result;
     }
 
     // =============================================================================
@@ -397,10 +434,13 @@ library CommitmentSchemeVerifierLib {
         view 
         returns (CirclePolyDegreeBound.Bound[] memory bounds) 
     {
-        // Rust: self.column_log_sizes().flatten().into_iter().sorted().rev().dedup()
-        uint32[] memory processedLogSizes = state.columnLogSizes.flattenSortReverseDedup();
+        // Flatten all column log sizes from all trees
+        uint32[] memory flattenedLogSizes = _flattenColumnLogSizes(state);
         
-        // Rust: .map(|log_size| CirclePolyDegreeBound::new(log_size - self.config.fri_config.log_blowup_factor))
+        // Sort, reverse, and deduplicate
+        uint32[] memory processedLogSizes = _sortReverseDedup(flattenedLogSizes);
+        
+        // Map to CirclePolyDegreeBound
         uint32 logBlowupFactor = state.config.friConfig.logBlowupFactor;
         bounds = new CirclePolyDegreeBound.Bound[](processedLogSizes.length);
         
@@ -418,7 +458,7 @@ library CommitmentSchemeVerifierLib {
         view 
         returns (uint32[] memory flattened) 
     {
-        return state.columnLogSizes.flatten();
+        return _flattenColumnLogSizes(state);
     }
 
     /// @notice Get processed column log sizes (sorted, reversed, deduplicated)
@@ -429,7 +469,8 @@ library CommitmentSchemeVerifierLib {
         view
         returns (uint32[] memory processed)
     {
-        return state.columnLogSizes.flattenSortReverseDedup();
+        uint32[] memory flattened = _flattenColumnLogSizes(state);
+        return _sortReverseDedup(flattened);
     }
 
     /// @notice Calculate bounds with explicit log blowup factor (for testing)
@@ -444,12 +485,72 @@ library CommitmentSchemeVerifierLib {
         view 
         returns (CirclePolyDegreeBound.Bound[] memory bounds) 
     {
-        uint32[] memory processedLogSizes = state.columnLogSizes.flattenSortReverseDedup();
+        uint32[] memory flattened = _flattenColumnLogSizes(state);
+        uint32[] memory processedLogSizes = _sortReverseDedup(flattened);
         bounds = new CirclePolyDegreeBound.Bound[](processedLogSizes.length);
         
         for (uint256 i = 0; i < processedLogSizes.length; i++) {
             uint32 adjustedLogSize = processedLogSizes[i] - logBlowupFactor;
             bounds[i] = CirclePolyDegreeBound.create(adjustedLogSize);
+        }
+    }
+    
+    /// @notice Helper: Flatten column log sizes from all trees
+    function _flattenColumnLogSizes(VerifierState storage state) 
+        private 
+        view 
+        returns (uint32[] memory flattened) 
+    {
+        // Count total columns
+        uint256 totalColumns = 0;
+        for (uint256 i = 0; i < state.merkleVerifier.trees.length; i++) {
+            totalColumns += state.merkleVerifier.trees[i].columnLogSizes.length;
+        }
+        
+        // Flatten
+        flattened = new uint32[](totalColumns);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < state.merkleVerifier.trees.length; i++) {
+            uint32[] memory treeColumns = state.merkleVerifier.trees[i].columnLogSizes;
+            for (uint256 j = 0; j < treeColumns.length; j++) {
+                flattened[idx++] = treeColumns[j];
+            }
+        }
+    }
+    
+    /// @notice Helper: Sort, reverse, and deduplicate
+    function _sortReverseDedup(uint32[] memory arr) 
+        private 
+        pure 
+        returns (uint32[] memory result) 
+    {
+        if (arr.length == 0) return new uint32[](0);
+        
+        // Sort ascending (bubble sort - simple for small arrays)
+        for (uint256 i = 0; i < arr.length; i++) {
+            for (uint256 j = i + 1; j < arr.length; j++) {
+                if (arr[i] < arr[j]) {
+                    (arr[i], arr[j]) = (arr[j], arr[i]);
+                }
+            }
+        }
+        
+        // Now arr is sorted descending (reversed)
+        // Deduplicate
+        uint32[] memory temp = new uint32[](arr.length);
+        temp[0] = arr[0];
+        uint256 uniqueCount = 1;
+        
+        for (uint256 i = 1; i < arr.length; i++) {
+            if (arr[i] != arr[i-1]) {
+                temp[uniqueCount++] = arr[i];
+            }
+        }
+        
+        // Copy to result
+        result = new uint32[](uniqueCount);
+        for (uint256 i = 0; i < uniqueCount; i++) {
+            result[i] = temp[i];
         }
     }
 }

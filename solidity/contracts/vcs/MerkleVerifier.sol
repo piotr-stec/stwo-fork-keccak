@@ -9,15 +9,31 @@ import "../fields/M31Field.sol";
 library MerkleVerifier {
     using M31Field for uint32;
 
-    /// @notice Merkle tree verifier state (matches Rust MerkleVerifier)
+    /// @notice Single Merkle tree verifier (matches Rust MerkleVerifier<H>)
     /// @param root Merkle tree root hash
-    /// @param columnLogSizes Log sizes for each column
-    /// @param nColumnsPerLogSize Number of columns for each log size (as arrays for memory compatibility)
-    struct Verifier {
+    /// @param columnLogSizes Log sizes for each column in this tree
+    /// @param nColumnsPerLogSize Number of columns for each log size (as parallel arrays for memory compatibility)
+    struct MerkleTree {
         bytes32 root;
         uint32[] columnLogSizes;
-        uint32[] logSizes;        // Unique log sizes
-        uint256[] nColumnsPerLogSize; // Corresponding counts
+        uint32[] logSizes;        // Unique log sizes (sorted keys)
+        uint256[] nColumnsPerLogSize; // Corresponding counts (parallel to logSizes)
+    }
+
+    /// @notice Commitment scheme verifier state (matches Rust CommitmentSchemeVerifier<MC>)
+    /// @dev Contains multiple Merkle trees (TreeVec<MerkleVerifier<MC::H>>)
+    /// @param trees Array of Merkle tree verifiers
+    struct Verifier {
+        MerkleTree[] trees;
+    }
+    
+    /// @notice Legacy single-tree verifier (for backward compatibility)
+    /// @dev Alias for MerkleTree - use this for single tree operations
+    struct VerifierLegacy {
+        bytes32 root;
+        uint32[] columnLogSizes;
+        uint32[] logSizes;
+        uint256[] nColumnsPerLogSize;
     }
 
     /// @notice Merkle decommitment proof (matches Rust MerkleDecommitment)
@@ -45,18 +61,36 @@ library MerkleVerifier {
     /// @notice Error thrown when query parameters are invalid
     error InvalidQuery(string reason);
 
-    /// @notice Create new Merkle verifier (matches Rust MerkleVerifier::new)
+    /// @notice Create new Merkle verifier with multiple trees (matches Rust CommitmentSchemeVerifier)
+    /// @param treeRoots Array of Merkle tree roots (one per tree)
+    /// @param treeColumnLogSizes Array of column log sizes arrays (one array per tree)
+    /// @return verifier New multi-tree verifier instance
+    function newVerifier(
+        bytes32[] memory treeRoots,
+        uint32[][] memory treeColumnLogSizes
+    ) internal pure returns (Verifier memory verifier) {
+        require(treeRoots.length == treeColumnLogSizes.length, "Mismatched trees and column sizes");
+        
+        verifier.trees = new MerkleTree[](treeRoots.length);
+        
+        for (uint256 treeIdx = 0; treeIdx < treeRoots.length; treeIdx++) {
+            verifier.trees[treeIdx] = createMerkleTree(treeRoots[treeIdx], treeColumnLogSizes[treeIdx]);
+        }
+    }
+
+    /// @notice Create single Merkle tree verifier (matches Rust MerkleVerifier::new)
+    /// @dev Public function to allow creating individual trees for CommitmentSchemeVerifier
     /// @param root Merkle tree root
     /// @param columnLogSizes Log sizes for columns
-    /// @return verifier New verifier instance
-    function newVerifier(
+    /// @return tree New Merkle tree instance
+    function createMerkleTree(
         bytes32 root,
         uint32[] memory columnLogSizes
-    ) internal pure returns (Verifier memory verifier) {
-        verifier.root = root;
-        verifier.columnLogSizes = columnLogSizes;
+    ) internal pure returns (MerkleTree memory tree) {
+        tree.root = root;
+        tree.columnLogSizes = columnLogSizes;
         
-        // Build n_columns_per_log_size arrays (matches Rust logic)
+        // Build n_columns_per_log_size arrays (matches Rust BTreeMap logic)
         // First pass: find unique log sizes
         uint32[] memory tempLogSizes = new uint32[](columnLogSizes.length);
         uint256[] memory tempCounts = new uint256[](columnLogSizes.length);
@@ -84,30 +118,47 @@ library MerkleVerifier {
         }
         
         // Copy to correctly sized arrays
-        verifier.logSizes = new uint32[](uniqueCount);
-        verifier.nColumnsPerLogSize = new uint256[](uniqueCount);
+        tree.logSizes = new uint32[](uniqueCount);
+        tree.nColumnsPerLogSize = new uint256[](uniqueCount);
         for (uint256 i = 0; i < uniqueCount; i++) {
-            verifier.logSizes[i] = tempLogSizes[i];
-            verifier.nColumnsPerLogSize[i] = tempCounts[i];
+            tree.logSizes[i] = tempLogSizes[i];
+            tree.nColumnsPerLogSize[i] = tempCounts[i];
         }
     }
 
-    /// @notice Verify Merkle decommitment (matches Rust MerkleVerifier::verify)
-    /// @param verifier Merkle verifier state
+    /// @notice Create single-tree verifier (legacy interface, backward compatible)
+    /// @param root Merkle tree root
+    /// @param columnLogSizes Log sizes for columns
+    /// @return verifier New single-tree verifier instance
+    function newVerifierSingleTree(
+        bytes32 root,
+        uint32[] memory columnLogSizes
+    ) internal pure returns (Verifier memory verifier) {
+        bytes32[] memory roots = new bytes32[](1);
+        roots[0] = root;
+        
+        uint32[][] memory columnSizes = new uint32[][](1);
+        columnSizes[0] = columnLogSizes;
+        
+        return newVerifier(roots, columnSizes);
+    }
+
+    /// @notice Verify Merkle decommitment for specific tree (matches Rust MerkleVerifier::verify)
+    /// @param tree Single Merkle tree to verify against
     /// @param queriesPerLogSize Queries organized by log size
     /// @param queriedValues Queried values in order
     /// @param decommitment Decommitment proof
     function verify(
-        Verifier memory verifier,
+        MerkleTree memory tree,
         QueriesPerLogSize[] memory queriesPerLogSize,
         uint32[] memory queriedValues,
         Decommitment memory decommitment
     ) internal pure {
         // Find max log size
         uint32 maxLogSize = 0;
-        for (uint256 i = 0; i < verifier.columnLogSizes.length; i++) {
-            if (verifier.columnLogSizes[i] > maxLogSize) {
-                maxLogSize = verifier.columnLogSizes[i];
+        for (uint256 i = 0; i < tree.columnLogSizes.length; i++) {
+            if (tree.columnLogSizes[i] > maxLogSize) {
+                maxLogSize = tree.columnLogSizes[i];
             }
         }
 
@@ -129,7 +180,7 @@ library MerkleVerifier {
         // Process each layer from max_log_size down to 0 (matches Rust loop)
         for (uint32 layerLogSize = maxLogSize; ; layerLogSize--) {
             // Get number of columns in this layer
-            uint256 nColumnsInLayer = _getColumnsForLogSize(verifier, layerLogSize);
+            uint256 nColumnsInLayer = _getColumnsForLogSize(tree, layerLogSize);
             
             // Process layer and get new layer hashes
             lastLayerHashes = _processLayer(
@@ -161,9 +212,26 @@ library MerkleVerifier {
             revert MerkleVerificationError("Expected single root hash");
         }
         
-        if (lastLayerHashes[0].hash != verifier.root) {
+        if (lastLayerHashes[0].hash != tree.root) {
             revert MerkleVerificationError("Root mismatch");
         }
+    }
+    
+    /// @notice Verify Merkle decommitment for multi-tree verifier
+    /// @param verifier Multi-tree verifier state
+    /// @param treeIndex Index of tree to verify
+    /// @param queriesPerLogSize Queries organized by log size
+    /// @param queriedValues Queried values in order
+    /// @param decommitment Decommitment proof
+    function verifyTree(
+        Verifier memory verifier,
+        uint256 treeIndex,
+        QueriesPerLogSize[] memory queriesPerLogSize,
+        uint32[] memory queriedValues,
+        Decommitment memory decommitment
+    ) internal pure {
+        require(treeIndex < verifier.trees.length, "Tree index out of bounds");
+        verify(verifier.trees[treeIndex], queriesPerLogSize, queriedValues, decommitment);
     }
 
     /// @notice Layer hash structure for propagation between layers
@@ -296,16 +364,16 @@ library MerkleVerifier {
     }
 
     /// @notice Get number of columns for a given log size
-    /// @param verifier Merkle verifier state
+    /// @param tree Merkle tree state
     /// @param logSize Log size to search for
     /// @return Number of columns for this log size
     function _getColumnsForLogSize(
-        Verifier memory verifier,
+        MerkleTree memory tree,
         uint32 logSize
     ) internal pure returns (uint256) {
-        for (uint256 i = 0; i < verifier.logSizes.length; i++) {
-            if (verifier.logSizes[i] == logSize) {
-                return verifier.nColumnsPerLogSize[i];
+        for (uint256 i = 0; i < tree.logSizes.length; i++) {
+            if (tree.logSizes[i] == logSize) {
+                return tree.nColumnsPerLogSize[i];
             }
         }
         return 0; // No columns for this log size
@@ -510,7 +578,7 @@ library MerkleVerifier {
     // BACKWARD COMPATIBILITY
     // =============================================================================
 
-    /// @notice Create verifier (alias for newVerifier)
+    /// @notice Create verifier (alias for newVerifierSingleTree)
     /// @param root Merkle tree root
     /// @param columnLogSizes Log sizes for columns
     /// @return verifier New verifier instance
@@ -518,7 +586,7 @@ library MerkleVerifier {
         bytes32 root,
         uint32[] memory columnLogSizes
     ) internal pure returns (Verifier memory verifier) {
-        return newVerifier(root, columnLogSizes);
+        return newVerifierSingleTree(root, columnLogSizes);
     }
 
     /// @notice Verify single position with M31 values array (for FriVerifier compatibility)
@@ -535,10 +603,14 @@ library MerkleVerifier {
         Decommitment memory decommitment,
         uint256 /* queryIndex */
     ) internal pure returns (bool) {
+        // For backward compatibility, use first tree
+        if (verifier.trees.length == 0) return true;
+        MerkleTree memory tree = verifier.trees[0];
+        
         uint32 logSize = 0;
-        for (uint256 i = 0; i < verifier.columnLogSizes.length; i++) {
-            if (verifier.columnLogSizes[i] > logSize) {
-                logSize = verifier.columnLogSizes[i];
+        for (uint256 i = 0; i < tree.columnLogSizes.length; i++) {
+            if (tree.columnLogSizes[i] > logSize) {
+                logSize = tree.columnLogSizes[i];
             }
         }
         
@@ -573,7 +645,7 @@ library MerkleVerifier {
             currentPos = currentPos / 2;
         }
         
-        // Final hash should match root
-        return currentHash == verifier.root;
+        // Final hash should match root (use first tree for backward compatibility)
+        return currentHash == tree.root;
     }
 }

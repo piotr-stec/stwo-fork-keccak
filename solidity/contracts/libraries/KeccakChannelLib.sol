@@ -35,6 +35,15 @@ library KeccakChannelLib {
         state.nDraws = 0;
     }
     
+    /// @notice Initialize channel state with specific digest and draw counter
+    /// @param state Channel state to initialize
+    /// @param digest Initial digest value
+    /// @param nDraws Initial number of draws
+    function initializeWith(ChannelState storage state, bytes32 digest, uint32 nDraws) internal {
+        state.digest = digest;
+        state.nDraws = nDraws;
+    }
+    
     /// @notice Clear channel state after verification
     /// @param state Channel state to clear
     function clearState(ChannelState storage state) internal {

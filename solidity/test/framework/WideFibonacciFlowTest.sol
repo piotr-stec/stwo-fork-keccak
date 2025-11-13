@@ -276,7 +276,7 @@ contract WideFibonacciFlowTest is Test {
             powBits: POW_BITS,
             friConfig: friConfig
         });
-        CommitmentSchemeVerifierLib.initialize(commitmentScheme, pcsConfig);
+        CommitmentSchemeVerifierLib.initializeEmpty(commitmentScheme, pcsConfig);
 
         uint256 setupEndGas = gasleft();
         uint256 totalSetupGas = setupStartGas - setupEndGas;
@@ -436,27 +436,6 @@ contract WideFibonacciFlowTest is Test {
         uint256 afterCompositionCommit = gasleft();
         console.log("* Composition polynomial commitment gas:", beforeCompositionCommit - afterCompositionCommit);
 
-        uint32[][] memory columnLogSizes2 = commitmentScheme
-            .columnLogSizes
-            .data;
-
-        console.log("Column log sizes in commitment scheme:");
-        for (uint256 treeIdx = 0; treeIdx < columnLogSizes2.length; treeIdx++) {
-            console.log(" Tree", treeIdx, "log sizes:");
-            for (
-                uint256 colIdx = 0;
-                colIdx < columnLogSizes2[treeIdx].length;
-                colIdx++
-            ) {
-                console.log(
-                    "  Column",
-                    colIdx,
-                    "log size:",
-                    columnLogSizes2[treeIdx][colIdx]
-                );
-            }
-        }
-
         console.log("Updated channel state after composition commitment:");
         console.log("  digest:");
         console.log(channel.nDraws);
@@ -565,37 +544,6 @@ contract WideFibonacciFlowTest is Test {
         console.log("  totalPoints:", samplePoints.totalPoints);
         console.log("  nColumns.length:", samplePoints.nColumns.length);
 
-        // // Print nColumns array
-        // for (uint256 i = 0; i < samplePoints.nColumns.length; i++) {
-        //     console.log("  nColumns[", i, "]:", samplePoints.nColumns[i]);
-        // }
-
-        // // Print points structure
-        // console.log("  points.length (trees):", samplePoints.points.length);
-        // for (uint256 treeIdx = 0; treeIdx < samplePoints.points.length; treeIdx++) {
-        //     console.log("  Tree", treeIdx, "columns:", samplePoints.points[treeIdx].length);
-
-        //     for (uint256 colIdx = 0; colIdx < samplePoints.points[treeIdx].length; colIdx++) {
-        //         if (samplePoints.points[treeIdx][colIdx].length > 0) {
-        //             // console.log("    Tree", treeIdx, "Col", colIdx, "points:", samplePoints.points[treeIdx][colIdx].length);
-
-        //             for (uint256 pointIdx = 0; pointIdx < samplePoints.points[treeIdx][colIdx].length; pointIdx++) {
-        //                 console.log("      Point[", pointIdx, "].x.first.real:", samplePoints.points[treeIdx][colIdx][pointIdx].x.first.real);
-        //                 console.log("      Point[", pointIdx, "].x.first.imag:", samplePoints.points[treeIdx][colIdx][pointIdx].x.first.imag);
-        //                 console.log("      Point[", pointIdx, "].x.second.real:", samplePoints.points[treeIdx][colIdx][pointIdx].x.second.real);
-        //                 console.log("      Point[", pointIdx, "].x.second.imag:", samplePoints.points[treeIdx][colIdx][pointIdx].x.second.imag);
-        //                 console.log("      Point[", pointIdx, "].y.first.real:", samplePoints.points[treeIdx][colIdx][pointIdx].y.first.real);
-        //                 console.log("      Point[", pointIdx, "].y.first.imag:", samplePoints.points[treeIdx][colIdx][pointIdx].y.first.imag);
-        //                 console.log("      Point[", pointIdx, "].y.second.real:", samplePoints.points[treeIdx][colIdx][pointIdx].y.second.real);
-        //                 console.log("      Point[", pointIdx, "].y.second.imag:", samplePoints.points[treeIdx][colIdx][pointIdx].y.second.imag);
-        //             }
-        //         }
-        //     }
-        // }
-
-        // // Print preprocessed points
-        // console.log("  preprocessed.length:", samplePoints.preprocessed.length);
-
         // Rust: sample_points.push(vec![vec![oods_point]; SECURE_EXTENSION_DEGREE]);
         // Add composition polynomial tree with SECURE_EXTENSION_DEGREE (4) columns
         uint256 beforeCompositionTreeSetup = gasleft();
@@ -683,62 +631,13 @@ contract WideFibonacciFlowTest is Test {
         console.log("* Sample points flattening gas:", beforeFlattening - afterFlattening);
         console.log("Total columns across all trees:", totalColumns);
 
-        uint256 beforePrintGas = gasleft();
-
-        // Create flattened view and print all points
-        // console.log("\nFlattened sample_points_by_column structure:");
-        // uint256 columnIndex = 0;
-        // for (
-        //     uint256 treeIdx = 0;
-        //     treeIdx < samplePoints.points.length;
-        //     treeIdx++
-        // ) {
-        //     for (
-        //         uint256 colIdx = 0;
-        //         colIdx < samplePoints.points[treeIdx].length;
-        //         colIdx++
-        //     ) {
-        //         if (samplePoints.points[treeIdx][colIdx].length > 0) {
-        //             // console.log("Flattened column", columnIndex, "from tree", treeIdx, "col", colIdx);
-        //             console.log(
-        //                 "  points count:",
-        //                 samplePoints.points[treeIdx][colIdx].length
-        //             );
-
-        //             // Print all points in this column
-        //             for (
-        //                 uint256 pointIdx = 0;
-        //                 pointIdx < samplePoints.points[treeIdx][colIdx].length;
-        //                 pointIdx++
-        //             ) {
-        //                 CirclePoint.Point memory point = samplePoints.points[
-        //                     treeIdx
-        //                 ][colIdx][pointIdx];
-        //                 console.log("  Point[", pointIdx, "]:");
-        //                 console.log("    x.first.real:", point.x.first.real);
-        //                 console.log("    x.first.imag:", point.x.first.imag);
-        //                 console.log("    x.second.real:", point.x.second.real);
-        //                 console.log("    x.second.imag:", point.x.second.imag);
-        //                 console.log("    y.first.real:", point.y.first.real);
-        //                 console.log("    y.first.imag:", point.y.first.imag);
-        //                 console.log("    y.second.real:", point.y.second.real);
-        //                 console.log("    y.second.imag:", point.y.second.imag);
-        //             }
-        //         } else {
-        //             console.log("Flattened column", columnIndex);
-        //         }
-        //         columnIndex++;
-        //     }
-        // }
-
-        uint256 afterPrintGas = gasleft();
-        console.log("* Debug printing gas:", beforePrintGas - afterPrintGas);
 
         uint256 beforeAccumulatorInit = gasleft();
         PointEvaluationAccumulator.Accumulator
             memory eval_accumulator = PointEvaluationAccumulator.newAccumulator(
                 randomCoeff
             );
+
         uint256 afterAccumulatorInit = gasleft();
         console.log("* Accumulator initialization gas:", beforeAccumulatorInit - afterAccumulatorInit);
 
@@ -775,25 +674,6 @@ contract WideFibonacciFlowTest is Test {
         // =============================================================================
         uint256 phase7StartGas = gasleft();
         console.log("\n=== PHASE 7: FRI VERIFIER INITIALIZATION ===");
-
-        uint32[][] memory columnLogSizes = commitmentScheme.columnLogSizes.data;
-
-        console.log("Column log sizes in commitment scheme:");
-        for (uint256 treeIdx = 0; treeIdx < columnLogSizes.length; treeIdx++) {
-            console.log(" Tree", treeIdx, "log sizes:");
-            for (
-                uint256 colIdx = 0;
-                colIdx < columnLogSizes[treeIdx].length;
-                colIdx++
-            ) {
-                console.log(
-                    "  Column",
-                    colIdx,
-                    "log size:",
-                    columnLogSizes[treeIdx][colIdx]
-                );
-            }
-        }
 
         uint256 beforeSampledValuesFlattening = gasleft();
         QM31Field.QM31[] memory flattenedSampledValues = _createRealSampledValuesFlattened();
@@ -1035,7 +915,7 @@ contract WideFibonacciFlowTest is Test {
         console.log("\n=== Calculating FRI Answers ===");
         
         // Prepare data for fri_answers call
-        uint32[][] memory commitmentColumnLogSizes = commitmentScheme.columnLogSizes.data;
+        uint32[][] memory commitmentColumnLogSizes = commitmentScheme.columnLogSizes();
         
         // Create simplified point samples structure (for proof of concept)
         FriVerifier.PointSample[][][] memory pointSamples = new FriVerifier.PointSample[][][](commitmentColumnLogSizes.length);
@@ -1071,18 +951,7 @@ contract WideFibonacciFlowTest is Test {
         // Get real queried values as M31 (base field) values
         uint32[][] memory realQueriedValuesM31 = getRealQueriedValuesM31();
         
-        // console.log("Real queried values (M31):");
-        // for (uint256 i = 0; i < realQueriedValuesM31.length; i++) {
-        //     console.log("  Tree", i, "values:", realQueriedValuesM31[i].length);
-        //     if (realQueriedValuesM31[i].length > 0) {
-        //         console.log("    First few values:");
-        //         uint256 maxDisplay = realQueriedValuesM31[i].length < 5 ? realQueriedValuesM31[i].length : 5;
-        //         for (uint256 j = 0; j < maxDisplay; j++) {
-        //             console.log("      Value", j, ":", realQueriedValuesM31[i][j]);
-        //         }
-        //     }
-        // }
-        
+  
         // Simple call without try-catch for now (can add error handling later)
         QM31Field.QM31[][] memory friAnswersResult = FriVerifier.friAnswers(
             commitmentColumnLogSizes,
@@ -1819,15 +1688,15 @@ contract WideFibonacciFlowTest is Test {
     /// @notice Get n_columns_per_log_size for each tree (matching Rust BTreeMap<u32, usize>)
     /// @param scheme The commitment scheme state
     /// @return Array of [logSize, nColumns] pairs for each tree
-    function getNColumnsPerLogSize(CommitmentSchemeVerifierLib.VerifierState memory scheme) 
+    function getNColumnsPerLogSize(CommitmentSchemeVerifierLib.VerifierState storage scheme) 
         internal 
-        pure 
+        view 
         returns (uint32[][][] memory) 
     {
-        uint32[][][] memory result = new uint32[][][](scheme.columnLogSizes.data.length);
+        uint32[][][] memory result = new uint32[][][](scheme.columnLogSizes().length);
         
-        for (uint256 treeIdx = 0; treeIdx < scheme.columnLogSizes.data.length; treeIdx++) {
-            uint32[] memory columnLogSizes = scheme.columnLogSizes.data[treeIdx];
+        for (uint256 treeIdx = 0; treeIdx < scheme.columnLogSizes().length; treeIdx++) {
+            uint32[] memory columnLogSizes = scheme.columnLogSizes()[treeIdx];
             
             if (columnLogSizes.length == 0) {
                 result[treeIdx] = new uint32[][](0);

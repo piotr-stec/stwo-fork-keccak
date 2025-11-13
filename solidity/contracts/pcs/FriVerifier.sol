@@ -1397,7 +1397,7 @@ library FriVerifier {
         }
 
         // Create MerkleVerifier
-        MerkleVerifier.Verifier memory verifier = MerkleVerifier.newVerifier(
+        MerkleVerifier.MerkleTree memory verifier = MerkleVerifier.createMerkleTree(
             firstLayer.proof.commitment,
             columnLogSizes
         );
@@ -1990,7 +1990,7 @@ library FriVerifier {
             columnLogSizes[i] = layer.domain.logSize;
         }
 
-        MerkleVerifier.Verifier memory verifier = MerkleVerifier.newVerifier(
+        MerkleVerifier.MerkleTree memory verifier = MerkleVerifier.createMerkleTree(
             layer.proof.commitment,
             columnLogSizes
         );
