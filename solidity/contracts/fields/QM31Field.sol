@@ -84,6 +84,32 @@ library QM31Field {
         );
     }
 
+    /// @notice Combine partial evaluations into single QM31 value
+    /// @dev Rust: QM31::from_partial_evals(evals)
+    /// Given evaluations at basis points [1, i, u, iu], combine using:
+    /// res = evals[0]*1 + evals[1]*i + evals[2]*u + evals[3]*iu
+    /// where i = (0,1,0,0), u = (0,0,1,0), iu = (0,0,0,1)
+    /// @param evals Array of 4 QM31 evaluations
+    /// @return Combined QM31 value
+    function fromPartialEvals(QM31[4] memory evals) internal pure returns (QM31 memory) {
+        // Start with evals[0] * 1
+        QM31 memory res = evals[0];
+        
+        // Add evals[1] * i  where i = (0, 1, 0, 0)
+        QM31 memory basis_i = fromU32Unchecked(0, 1, 0, 0);
+        res = add(res, mul(evals[1], basis_i));
+        
+        // Add evals[2] * u  where u = (0, 0, 1, 0)
+        QM31 memory basis_u = fromU32Unchecked(0, 0, 1, 0);
+        res = add(res, mul(evals[2], basis_u));
+        
+        // Add evals[3] * iu where iu = (0, 0, 0, 1)
+        QM31 memory basis_iu = fromU32Unchecked(0, 0, 0, 1);
+        res = add(res, mul(evals[3], basis_iu));
+        
+        return res;
+    }
+
     /// @notice Addition in QM31 field
     /// @param a First operand
     /// @param b Second operand

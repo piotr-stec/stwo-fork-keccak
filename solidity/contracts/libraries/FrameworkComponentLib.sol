@@ -11,6 +11,7 @@ import "../framework/IFrameworkEval.sol";
 import "../framework/PointEvaluatorLib.sol";
 import "../framework/TreeSubspan.sol";
 import "../framework/TreeVecExtensions.sol";
+import "./TraceLocationAllocatorLib.sol";
 
 /// @title FrameworkComponentLib
 /// @notice Library implementing FrameworkComponent functionality for gas optimization
@@ -19,6 +20,7 @@ library FrameworkComponentLib {
     using QM31Field for QM31Field.QM31;
     using TreeSubspan for TreeSubspan.Subspan;
     using TreeVecExtensions for QM31Field.QM31[][][];
+    using TraceLocationAllocatorLib for TraceLocationAllocatorLib.AllocatorState;
     using CanonicCoset for CanonicCoset.CanonicCosetStruct;
     using CanonicCosetM31 for CanonicCosetM31.CanonicCosetStruct;
     using CirclePointM31 for CirclePointM31.Point;
@@ -52,6 +54,8 @@ library FrameworkComponentLib {
         uint32 logSize;
         string componentName;
         string description;
+        int32[][][] maskOffsets;        // Mask offsets: [tree][column][offset_values] from InfoEvaluator
+        uint256[] preprocessedColumns;  // Preprocessed column IDs
     }
 
     /// @notice Framework component state
@@ -78,6 +82,99 @@ library FrameworkComponentLib {
     // =============================================================================
     // Library Functions
     // =============================================================================
+
+    /// @notice Create component state from precomputed ComponentInfo
+    /// @dev Instead of evaluating an InfoEvaluator on-chain, accept precomputed
+    ///      ComponentInfo (mask offsets, preprocessed columns, etc.) and use it to
+    ///      allocate trace locations and initialize the component state.
+    /// @param state Component state (will be initialized)
+    /// @param allocator Location allocator (will be modified)
+    /// @param evaluatorAddr Address of IFrameworkEval implementation (stored in state)
+    /// @param claimedSum Claimed sum for logup constraints
+    /// @param info Precomputed ComponentInfo (maskOffsets, preprocessedColumns, etc.)
+    /// @return traceLocations Allocated trace locations
+    /// @return preprocessedColumnIndices Indices of preprocessed columns
+    /// @return returnedInfo The same ComponentInfo that was passed in
+    function createComponent(
+        ComponentState storage state,
+        TraceLocationAllocatorLib.AllocatorState storage allocator,
+        address evaluatorAddr,
+        QM31Field.QM31 memory claimedSum,
+        ComponentInfo memory info
+    ) 
+        external 
+        returns (
+            TreeSubspan.Subspan[] memory traceLocations,
+            uint256[] memory preprocessedColumnIndices,
+            ComponentInfo memory returnedInfo
+        )
+    {
+        require(evaluatorAddr != address(0), "Invalid evaluator address");
+
+        // Convert mask_offsets structure to column counts for allocator
+        // Rust: location_allocator.next_for_structure(&info.mask_offsets)
+        // where mask_offsets is TreeVec<ColumnVec<Vec<isize>>>
+        // We need to extract the number of columns per tree
+        uint256[] memory treeStructure = new uint256[](info.maskOffsets.length);
+        for (uint256 i = 0; i < info.maskOffsets.length; i++) {
+            treeStructure[i] = info.maskOffsets[i].length;  // Number of columns in this tree
+        }
+        
+        // Allocate trace locations based on tree structure
+        traceLocations = allocator.nextForStructure(
+            treeStructure,
+            ORIGINAL_TRACE_IDX
+        );
+
+        // Build preprocessed column indices from provided preprocessedColumns
+        preprocessedColumnIndices = _getPreprocessedColumnIndices(
+            allocator,
+            info.preprocessedColumns
+        );
+
+        // Initialize component state inline (no forward-call to initialize)
+        require(!state.isInitialized, "Component already initialized");
+        require(traceLocations.length > 0, "No trace locations provided");
+        require(info.logSize > 0, "Invalid log size");
+        require(info.nConstraints > 0, "No constraints defined");
+
+        state.eval = evaluatorAddr;
+        state.claimedSum = claimedSum;
+        state.info = info;
+        state.isInitialized = true;
+
+        // Store trace locations
+        delete state.traceLocations;
+        for (uint256 i = 0; i < traceLocations.length; i++) {
+            state.traceLocations.push(traceLocations[i]);
+        }
+
+        // Store preprocessed column indices
+        delete state.preprocessedColumnIndices;
+        for (uint256 i = 0; i < preprocessedColumnIndices.length; i++) {
+            state.preprocessedColumnIndices.push(preprocessedColumnIndices[i]);
+        }
+
+        returnedInfo = info;
+    }
+    
+    /// @notice Get preprocessed column indices
+    /// @dev Matches the preprocessed_column_indices logic in Rust
+    function _getPreprocessedColumnIndices(
+        TraceLocationAllocatorLib.AllocatorState storage allocator,
+        uint256[] memory preprocessedColumns
+    ) 
+        private 
+        returns (uint256[] memory indices) 
+    {
+        indices = new uint256[](preprocessedColumns.length);
+        
+        for (uint256 i = 0; i < preprocessedColumns.length; i++) {
+            // TODO: Implement column lookup/allocation
+            // For now, just return the column index
+            indices[i] = preprocessedColumns[i];
+        }
+    }
 
     /// @notice Initialize framework component state
     /// @dev Maps to: FrameworkComponent::new(location_allocator, eval, claimed_sum)
@@ -191,8 +288,7 @@ library FrameworkComponentLib {
         CanonicCosetM31.CanonicCosetStruct memory canonicCosetM31 = CanonicCosetM31.newCanonicCoset(IFrameworkEval(state.eval).logSize());
         CirclePointM31.Point memory traceStepM31 = CanonicCosetM31.step(canonicCosetM31);
 
-        // Hardcoded mask offsets structure for WideFibonacci component
-        // Rust: self.info.mask_offsets.as_ref().map_cols(...)
+
         
         // Initialize TreeVec structure (3 trees: PREPROCESSED, ORIGINAL_TRACE, INTERACTION)
         uint256 nTrees = 3;
@@ -233,20 +329,16 @@ library FrameworkComponentLib {
                     uint256 colIdx = location.colStart + colOffset;
                     if (colIdx < samplePoints.points[treeIdx].length) {
                         
-                        // Hardcoded mask offsets for WideFibonacci TreeVec structure:
-                        // Tree 0 (preprocessed): [] (empty)
-                        // Tree 1 (trace): [[0], [0], ..., [0]] (50 columns, each with offset [0])
+                        // Get mask offsets from ComponentInfo (computed by InfoEvaluator in Rust)
+                        // Rust: self.info.mask_offsets[tree_idx][col_idx]
                         int32[] memory maskOffsets;
                         
-                        if (treeIdx == PREPROCESSED_TRACE_IDX) {
-                            // Preprocessed tree: empty offsets
-                            maskOffsets = new int32[](0);
-                        } else if (treeIdx == ORIGINAL_TRACE_IDX) {
-                            // Trace tree: each column has offset [0]
-                            maskOffsets = new int32[](1);
-                            maskOffsets[0] = 0;
+                        if (treeIdx < state.info.maskOffsets.length && 
+                            colIdx < state.info.maskOffsets[treeIdx].length) {
+                            // Use offsets from ComponentInfo
+                            maskOffsets = state.info.maskOffsets[treeIdx][colIdx];
                         } else {
-                            // Other trees: no offsets for now
+                            // Fallback: empty offsets
                             maskOffsets = new int32[](0);
                         }
                         
@@ -275,90 +367,23 @@ library FrameworkComponentLib {
             }
         }
         
-        // Handle preprocessed columns (tree 0) - typically empty for WideFibonacci
+        // Handle preprocessed columns (tree 0)
+        // Rust: for idx in component.preprocessed_column_indices() {
+        //           preprocessed_mask_points[idx] = vec![point];
+        //       }
+        for (uint256 i = 0; i < state.preprocessedColumnIndices.length; i++) {
+            uint256 colIdx = state.preprocessedColumnIndices[i];
+            if (colIdx < samplePoints.points[PREPROCESSED_TRACE_IDX].length) {
+                samplePoints.points[PREPROCESSED_TRACE_IDX][colIdx] = new CirclePoint.Point[](1);
+                samplePoints.points[PREPROCESSED_TRACE_IDX][colIdx][0] = point;
+                samplePoints.totalPoints++;
+            }
+        }
+        
         samplePoints.preprocessed = samplePoints.points[PREPROCESSED_TRACE_IDX];
         
         return samplePoints;
         
-        
-        // // Get mask points from evaluator (delegates to component implementation)
-        // // Rust: self.info.mask_offsets.as_ref().map_cols(...)
-        // CirclePoint.Point[][] memory componentMaskPoints = IFrameworkEval(state.eval).maskPoints(point, traceStep);
-        
-        // // Initialize TreeVec structure (3 trees: PREPROCESSED, ORIGINAL_TRACE, INTERACTION)
-        // uint256 nTrees = 3;
-        // samplePoints.points = new CirclePoint.Point[][][](nTrees);
-        // samplePoints.nColumns = new uint256[](nTrees);
-        // samplePoints.totalPoints = 0;
-        
-        // // Initialize all trees as empty
-        // for (uint256 treeIdx = 0; treeIdx < nTrees; treeIdx++) {
-        //     samplePoints.nColumns[treeIdx] = 0;
-        //     samplePoints.points[treeIdx] = new CirclePoint.Point[][](0);
-        // }
-        
-        // // Place component mask points in the correct tree locations
-        // for (uint256 locationIdx = 0; locationIdx < state.traceLocations.length; locationIdx++) {
-        //     TreeSubspan.Subspan memory location = state.traceLocations[locationIdx];
-        //     uint256 treeIdx = location.treeIndex;
-            
-        //     if (treeIdx < nTrees) {
-        //         uint256 numCols = location.size();
-                
-        //         // Ensure tree has enough space
-        //         if (samplePoints.points[treeIdx].length < location.colEnd) {
-        //             CirclePoint.Point[][] memory newTree = new CirclePoint.Point[][](location.colEnd);
-        //             for (uint256 i = 0; i < samplePoints.points[treeIdx].length; i++) {
-        //                 newTree[i] = samplePoints.points[treeIdx][i];
-        //             }
-        //             samplePoints.points[treeIdx] = newTree;
-        //             samplePoints.nColumns[treeIdx] = location.colEnd;
-        //         }
-                
-        //         // Copy mask points from component to tree location
-        //         for (uint256 colOffset = 0; colOffset < numCols && colOffset < componentMaskPoints.length; colOffset++) {
-        //             uint256 colIdx = location.colStart + colOffset;
-        //             if (colIdx < samplePoints.points[treeIdx].length) {
-        //                 samplePoints.points[treeIdx][colIdx] = componentMaskPoints[colOffset];
-        //                 samplePoints.totalPoints += componentMaskPoints[colOffset].length;
-        //             }
-        //         }
-        //     }
-        // }
-        
-        // // Handle preprocessed columns (tree 0)
-        // // Rust: for idx in component.preprocessed_column_indices() { preprocessed_mask_points[idx] = vec![point]; }
-        // if (state.preprocessedColumnIndices.length > 0) {
-        //     // Ensure preprocessed tree exists and has enough space
-        //     uint256 maxPreprocessedIdx = 0;
-        //     for (uint256 i = 0; i < state.preprocessedColumnIndices.length; i++) {
-        //         if (state.preprocessedColumnIndices[i] > maxPreprocessedIdx) {
-        //             maxPreprocessedIdx = state.preprocessedColumnIndices[i];
-        //         }
-        //     }
-            
-        //     if (samplePoints.points[PREPROCESSED_TRACE_IDX].length <= maxPreprocessedIdx) {
-        //         CirclePoint.Point[][] memory newPreprocessedTree = new CirclePoint.Point[][](maxPreprocessedIdx + 1);
-        //         for (uint256 i = 0; i < samplePoints.points[PREPROCESSED_TRACE_IDX].length; i++) {
-        //             newPreprocessedTree[i] = samplePoints.points[PREPROCESSED_TRACE_IDX][i];
-        //         }
-        //         samplePoints.points[PREPROCESSED_TRACE_IDX] = newPreprocessedTree;
-        //         samplePoints.nColumns[PREPROCESSED_TRACE_IDX] = maxPreprocessedIdx + 1;
-        //     }
-            
-        //     // Set preprocessed mask points
-        //     for (uint256 i = 0; i < state.preprocessedColumnIndices.length; i++) {
-        //         uint256 idx = state.preprocessedColumnIndices[i];
-        //         samplePoints.points[PREPROCESSED_TRACE_IDX][idx] = new CirclePoint.Point[](1);
-        //         samplePoints.points[PREPROCESSED_TRACE_IDX][idx][0] = point;
-        //         samplePoints.totalPoints++;
-        //     }
-        // }
-        
-        // // Set convenient preprocessed access
-        // samplePoints.preprocessed = samplePoints.points[PREPROCESSED_TRACE_IDX];
-        
-        // return samplePoints;
     }
 
     /// @notice Get preprocessed column indices
