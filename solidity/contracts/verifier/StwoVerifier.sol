@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
+import "forge-std/console.sol";
 import "../framework/IFrameworkEval.sol";
 import "../libraries/FrameworkComponentLib.sol";
 import "../libraries/TraceLocationAllocatorLib.sol";
@@ -88,6 +89,7 @@ contract STWOVerifier {
         uint32 logSize = evaluator.logSize();
         
         // Initialize channel and commitment scheme (resets state for each verification)
+        // NOTE: digest and nDraws should already include preprocessed and trace commitments
         KeccakChannelLib.initializeWith(_channel, digest, nDraws);
         CommitmentSchemeVerifierLib.initialize(_commitmentScheme, proof.config, treeRoots, treeColumnLogSizes);
 
@@ -125,7 +127,7 @@ contract STWOVerifier {
         
         FrameworkComponentLib.SamplePoints memory samplePoints = _computeSamplePoints(
             oodsPoint,
-            proof.commitments.length,
+            proof.commitments.length - 1,  // Exclude composition commitment (it's added internally)
             params
         );
 
@@ -209,7 +211,7 @@ contract STWOVerifier {
             proof.friProof,
             proof.config.friConfig,
             pointSamples,
-            proof.decommitments,
+            // proof.decommitments,
             proof.queriedValues,
             randomCoeff2
         );
@@ -475,6 +477,8 @@ contract STWOVerifier {
 
     /// @notice Verify proof of work
     /// @dev Checks that the PoW nonce produces a valid hash
+    event PoWVerification(uint64 nonce, uint32 powBits, bool result);
+
     function _verifyProofOfWork(
         uint64 nonce,
         uint32 powBits
@@ -483,6 +487,7 @@ contract STWOVerifier {
         returns (bool) 
     {
         bool powResult = _channel.verifyPowNonce(powBits, nonce);
+        emit PoWVerification(nonce, powBits, powResult);
         return powResult; 
     }
 
@@ -492,7 +497,7 @@ contract STWOVerifier {
         FriVerifier.FriProof memory friProof,
         PcsConfig.FriConfig memory friConfig,
         FriVerifier.PointSample[][][] memory pointSamples,
-        MerkleVerifier.Decommitment[] memory decommitments,
+        // MerkleVerifier.Decommitment[] memory decommitments,
         uint32[][] memory queriedValues,
         QM31Field.QM31 memory randomCoeff
     ) 

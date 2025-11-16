@@ -17,6 +17,9 @@ import "../../contracts/core/CirclePolyDegreeBound.sol";
 import "../../contracts/fields/QM31Field.sol";
 import "../../contracts/pcs/FriVerifier.sol";
 
+import "../../contracts/verifier/StwoVerifier.sol";
+import "../../contracts/verifier/ProofParser.sol";
+
 /// @title WideFibonacciFlowTest
 /// @notice Test replicating verification flow from Rust with REAL proof.json data
 /// @dev Uses actual commitments, sampled_values, and config from proof.json
@@ -512,13 +515,25 @@ contract WideFibonacciFlowTest is Test {
         console.log("Trace locations allocated for WideFibonacciComponent");
         console.log("Trace locations colEnd: ", traceLocations[1].colEnd);
 
+        // Component info with mask offsets matching Rust InfoEvaluator
+        // TreeVec([[], [[0], [0], ..., [0]]]) - empty preprocessed, 50 trace columns with offset 0
+        int32[][][] memory maskOffsets = new int32[][][](2);  // 2 trees
+        maskOffsets[0] = new int32[][](0);  // Tree 0: PREPROCESSED - empty
+        maskOffsets[1] = new int32[][](50);  // Tree 1: ORIGINAL_TRACE (50 columns for WideFibonacci)
+        for (uint256 i = 0; i < 50; i++) {
+            maskOffsets[1][i] = new int32[](1);  // Each column has 1 mask point
+            maskOffsets[1][i][0] = 0;            // Offset is 0 (current row)
+        }
+
         FrameworkComponentLib.ComponentInfo
             memory componentInfo = FrameworkComponentLib.ComponentInfo({
                 nConstraints: 50 >= 2 ? 50 - 2 : 0,
                 maxConstraintLogDegreeBound: 3 + 1,
                 logSize: 3,
                 componentName: "WideFibonacciComponent",
-                description: "Wide Fibonacci component for testing"
+                description: "Wide Fibonacci component for testing",
+                maskOffsets: maskOffsets,
+                preprocessedColumns: new uint256[](0)
             });
 
         // Initialize the component (equivalent to WideFibonacciComponent::new)
@@ -1113,6 +1128,70 @@ contract WideFibonacciFlowTest is Test {
         console.log("* All phases completed successfully");
         console.log("* Individual phase gas usage logged above");
         console.log("============================================================");
+    }
+
+    function test_realVerifier() public {
+        ProofParser.Proof memory proof;
+        proof.commitments = getRealCommitments();
+        proof.config.powBits = POW_BITS;
+        proof.proofOfWork = 1615;
+        proof.config.friConfig.logBlowupFactor = LOG_BLOWUP_FACTOR;
+        proof.config.friConfig.logLastLayerDegreeBound = LOG_LAST_LAYER_DEGREE_BOUND;
+        proof.config.friConfig.nQueries = N_QUERIES;
+        proof.sampledValues = _createRealSampledValues();
+        // proof.decommitments = MerkleVerifier.Decommitment[](0);
+        proof.queriedValues = getRealQueriedValuesM31();
+        proof.friProof = getRealFriProof();
+        int32[][][] memory maskOffsets = new int32[][][](2);  // 2 trees
+        maskOffsets[0] = new int32[][](0);  // Tree 0: PREPROCESSED - empty
+        maskOffsets[1] = new int32[][](50);  // Tree 1: ORIGINAL_TRACE (50 columns for WideFibonacci)
+        for (uint256 i = 0; i < 50; i++) {
+            maskOffsets[1][i] = new int32[](1);  // Each column has 1 mask point
+            maskOffsets[1][i][0] = 0;            // Offset is 0 (current row)
+        }
+
+
+        FrameworkComponentLib.ComponentInfo memory componentInfo = FrameworkComponentLib.ComponentInfo({
+            nConstraints: 50 >= 2 ? 50 - 2 : 0,
+            maxConstraintLogDegreeBound: 3 + 1,
+            logSize: 3,
+            componentName: "WideFibonacciComponent",
+            description: "Wide Fibonacci component for testing",
+            maskOffsets: maskOffsets,
+            preprocessedColumns: new uint256[](0)
+        });
+
+        WideFibonacciEval wideFibEvalAddress = new WideFibonacciEval(3, 50);
+        STWOVerifier verifier = new STWOVerifier();
+        STWOVerifier.VerificationParams memory params = STWOVerifier.VerificationParams({
+            evaluator: address(wideFibEvalAddress),
+            nColumns: 50,
+            claimedSum: QM31Field.zero(),
+            componentInfo: componentInfo
+        });
+
+        bytes32[] memory treeRoots = new bytes32[](2);
+        treeRoots[0] = proof.commitments[0]; // PREPROCESSED
+        treeRoots[1] = proof.commitments[1]; // ORIGINAL_TRACE
+        uint32[][] memory treeColumnLogSizes= new uint32[][](2);
+           // Tree 0: Empty (preprocessed) - extended log sizes: []
+        treeColumnLogSizes[0] = new uint32[](0);
+        
+        // Tree 1: 50 trace columns - extended log sizes: [4, 4, 4, ...] (50 times)
+        treeColumnLogSizes[1] = new uint32[](50);
+        for (uint256 i = 0; i < 50; i++) {
+            treeColumnLogSizes[1][i] = 4;  // logSize(3) + logBlowupFactor(1) = 4
+        }
+        bytes32 digest = 0x4bf4f70138f3d2b12e3b0a724f67e69f2572d2818833ef6ec92e80ca3d11d687;
+        uint32 nDraws = 0;
+
+        uint256 gas_before = gasleft();
+        bool result = verifier.verify(proof, params, treeRoots, treeColumnLogSizes, digest, nDraws);
+        uint256 gas_after = gasleft();
+        console.log("Gas used for verification:", gas_before - gas_after);
+        assertEq(result, true, "STWO verification failed");
+
+
     }
 
     // =============================================================================
