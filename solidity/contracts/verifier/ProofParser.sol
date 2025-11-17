@@ -125,7 +125,7 @@ library ProofParser {
         proof.config = config;
         proof.commitments = commitments;
         proof.sampledValues = sampledValues;
-        proof.decommitments = decommitments;
+        // proof.decommitments = decommitments;
         proof.queriedValues = queriedValues;
         proof.proofOfWork = proofOfWork;
         proof.friProof = friProof;

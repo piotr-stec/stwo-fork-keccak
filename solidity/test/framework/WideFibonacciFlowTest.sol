@@ -859,22 +859,22 @@ contract WideFibonacciFlowTest is Test {
         // =============================================================================
         console.log("\n=== Verifying Merkle Decommitments ===");
         
-        // Get real decommitments and queried values from proof.json
-        bytes[] memory realDecommitments = getRealDecommitments();
-        uint256[][] memory realQueriedValues = getRealQueriedValues();
+        // // Get real decommitments and queried values from proof.json
+        // bytes[] memory realDecommitments = getRealDecommitments();
+        // uint256[][] memory realQueriedValues = getRealQueriedValues();
         
-        console.log("Real decommitments count:", realDecommitments.length);
-        console.log("Real queried values count:", realQueriedValues.length);
+        // console.log("Real decommitments count:", realDecommitments.length);
+        // console.log("Real queried values count:", realQueriedValues.length);
         
-        // Verify each tree's decommitments
-        // trees.as_ref().zip_eq(proof.decommitments).zip_eq(proof.queried_values.clone())
-        for (uint256 i = 0; i < realDecommitments.length && i < realQueriedValues.length; i++) {
-            console.log("  Tree", i, "decommitment size:", realDecommitments[i].length);
-            console.log("  Tree", i, "queried values count:", realQueriedValues[i].length);
+        // // Verify each tree's decommitments
+        // // trees.as_ref().zip_eq(proof.decommitments).zip_eq(proof.queried_values.clone())
+        // for (uint256 i = 0; i < realDecommitments.length && i < realQueriedValues.length; i++) {
+        //     console.log("  Tree", i, "decommitment size:", realDecommitments[i].length);
+        //     console.log("  Tree", i, "queried values count:", realQueriedValues[i].length);
             
-            // TODO: Call tree.verify(&query_positions_per_log_size, queried_values, decommitment)
-            // This would require implementing MerkleVerifier.verify() function
-        }
+        //     // TODO: Call tree.verify(&query_positions_per_log_size, queried_values, decommitment)
+        //     // This would require implementing MerkleVerifier.verify() function
+        // }
 
         // =============================================================================  
         // Create Samples (matching Rust: sampled_points.zip_cols(sampled_values))
@@ -1138,6 +1138,7 @@ contract WideFibonacciFlowTest is Test {
         proof.config.friConfig.logBlowupFactor = LOG_BLOWUP_FACTOR;
         proof.config.friConfig.logLastLayerDegreeBound = LOG_LAST_LAYER_DEGREE_BOUND;
         proof.config.friConfig.nQueries = N_QUERIES;
+        proof.decommitments = getRealDecommitments();
         proof.sampledValues = _createRealSampledValues();
         // proof.decommitments = MerkleVerifier.Decommitment[](0);
         proof.queriedValues = getRealQueriedValuesM31();
@@ -1598,87 +1599,42 @@ contract WideFibonacciFlowTest is Test {
         return REAL_PROOF_OF_WORK;
     }
 
-    /// @notice Get real decommitments from proof.json
-    /// @return Array of decommitment data for each tree
-    function getRealDecommitments() internal pure returns (bytes[] memory) {
-        bytes[] memory decommitments = new bytes[](3);
-        
-        // Tree 0: Empty decommitment from proof.json
-        decommitments[0] = abi.encodePacked(
-            uint8(0), uint8(0) // Empty hash_witness and column_witness arrays
-        );
-        
-        // Tree 1: Full decommitment with hash_witness from proof.json
-        // 5 hash_witness arrays of 32 bytes each + empty column_witness
-        decommitments[1] = abi.encodePacked(
-            // First hash_witness array (32 bytes)
-            uint8(37), uint8(109), uint8(70), uint8(129), uint8(234), uint8(174), uint8(184), uint8(153),
-            uint8(102), uint8(173), uint8(14), uint8(43), uint8(74), uint8(71), uint8(213), uint8(35),
-            uint8(173), uint8(45), uint8(41), uint8(110), uint8(202), uint8(142), uint8(10), uint8(57),
-            uint8(235), uint8(236), uint8(82), uint8(105), uint8(44), uint8(165), uint8(74), uint8(91),
-            // Second hash_witness array (same as first - duplicated in proof.json)
-            uint8(37), uint8(109), uint8(70), uint8(129), uint8(234), uint8(174), uint8(184), uint8(153),
-            uint8(102), uint8(173), uint8(14), uint8(43), uint8(74), uint8(71), uint8(213), uint8(35),
-            uint8(173), uint8(45), uint8(41), uint8(110), uint8(202), uint8(142), uint8(10), uint8(57),
-            uint8(235), uint8(236), uint8(82), uint8(105), uint8(44), uint8(165), uint8(74), uint8(91),
-            // Third hash_witness array (32 bytes)
-            uint8(23), uint8(61), uint8(229), uint8(185), uint8(91), uint8(148), uint8(219), uint8(105),
-            uint8(167), uint8(133), uint8(98), uint8(158), uint8(55), uint8(49), uint8(191), uint8(166),
-            uint8(138), uint8(223), uint8(171), uint8(31), uint8(221), uint8(176), uint8(185), uint8(90),
-            uint8(153), uint8(37), uint8(198), uint8(93), uint8(197), uint8(153), uint8(206), uint8(19),
-            // Fourth hash_witness array (same as third - duplicated)
-            uint8(23), uint8(61), uint8(229), uint8(185), uint8(91), uint8(148), uint8(219), uint8(105),
-            uint8(167), uint8(133), uint8(98), uint8(158), uint8(55), uint8(49), uint8(191), uint8(166),
-            uint8(138), uint8(223), uint8(171), uint8(31), uint8(221), uint8(176), uint8(185), uint8(90),
-            uint8(153), uint8(37), uint8(198), uint8(93), uint8(197), uint8(153), uint8(206), uint8(19),
-            // Fifth hash_witness array (32 bytes)
-            uint8(155), uint8(67), uint8(105), uint8(117), uint8(255), uint8(86), uint8(79), uint8(75),
-            uint8(43), uint8(208), uint8(176), uint8(211), uint8(178), uint8(109), uint8(166), uint8(166),
-            uint8(52), uint8(134), uint8(82), uint8(146), uint8(115), uint8(14), uint8(184), uint8(121),
-            uint8(195), uint8(144), uint8(203), uint8(35), uint8(58), uint8(26), uint8(42), uint8(90),
-            uint8(0) // Empty column_witness
-        );
-        
-        // Tree 2: Full decommitment with hash_witness from proof.json
-        // 6 hash_witness arrays of 32 bytes each + empty column_witness  
-        decommitments[2] = abi.encodePacked(
-            // First hash_witness array (32 bytes)
-            uint8(171), uint8(202), uint8(64), uint8(193), uint8(28), uint8(82), uint8(54), uint8(15),
-            uint8(9), uint8(244), uint8(176), uint8(201), uint8(231), uint8(102), uint8(70), uint8(112),
-            uint8(123), uint8(105), uint8(202), uint8(187), uint8(159), uint8(59), uint8(59), uint8(243),
-            uint8(93), uint8(8), uint8(29), uint8(32), uint8(13), uint8(220), uint8(39), uint8(50),
-            // Second hash_witness array (32 bytes)
-            uint8(50), uint8(92), uint8(80), uint8(167), uint8(201), uint8(186), uint8(48), uint8(118),
-            uint8(40), uint8(229), uint8(240), uint8(169), uint8(189), uint8(91), uint8(239), uint8(102),
-            uint8(136), uint8(173), uint8(49), uint8(45), uint8(13), uint8(27), uint8(100), uint8(238),
-            uint8(108), uint8(207), uint8(63), uint8(173), uint8(208), uint8(248), uint8(42), uint8(36),
-            // Third and fourth are duplicates of second
-            uint8(50), uint8(92), uint8(80), uint8(167), uint8(201), uint8(186), uint8(48), uint8(118),
-            uint8(40), uint8(229), uint8(240), uint8(169), uint8(189), uint8(91), uint8(239), uint8(102),
-            uint8(136), uint8(173), uint8(49), uint8(45), uint8(13), uint8(27), uint8(100), uint8(238),
-            uint8(108), uint8(207), uint8(63), uint8(173), uint8(208), uint8(248), uint8(42), uint8(36),
-            uint8(50), uint8(92), uint8(80), uint8(167), uint8(201), uint8(186), uint8(48), uint8(118),
-            uint8(40), uint8(229), uint8(240), uint8(169), uint8(189), uint8(91), uint8(239), uint8(102),
-            uint8(136), uint8(173), uint8(49), uint8(45), uint8(13), uint8(27), uint8(100), uint8(238),
-            uint8(108), uint8(207), uint8(63), uint8(173), uint8(208), uint8(248), uint8(42), uint8(36),
-            // Fifth hash_witness array (32 bytes)
-            uint8(58), uint8(8), uint8(109), uint8(44), uint8(213), uint8(188), uint8(98), uint8(82),
-            uint8(228), uint8(161), uint8(119), uint8(179), uint8(76), uint8(221), uint8(211), uint8(242),
-            uint8(155), uint8(15), uint8(83), uint8(95), uint8(110), uint8(124), uint8(123), uint8(44),
-            uint8(180), uint8(233), uint8(178), uint8(216), uint8(3), uint8(200), uint8(171), uint8(58),
-            // Sixth hash_witness array (same as fifth - duplicated)
-            uint8(58), uint8(8), uint8(109), uint8(44), uint8(213), uint8(188), uint8(98), uint8(82),
-            uint8(228), uint8(161), uint8(119), uint8(179), uint8(76), uint8(221), uint8(211), uint8(242),
-            uint8(155), uint8(15), uint8(83), uint8(95), uint8(110), uint8(124), uint8(123), uint8(44),
-            uint8(180), uint8(233), uint8(178), uint8(216), uint8(3), uint8(200), uint8(171), uint8(58),
-            // Seventh hash_witness array (32 bytes)
-            uint8(47), uint8(157), uint8(158), uint8(144), uint8(122), uint8(106), uint8(6), uint8(152),
-            uint8(1), uint8(50), uint8(228), uint8(151), uint8(193), uint8(72), uint8(40), uint8(119),
-            uint8(91), uint8(14), uint8(118), uint8(149), uint8(204), uint8(44), uint8(126), uint8(226),
-            uint8(40), uint8(182), uint8(9), uint8(70), uint8(60), uint8(214), uint8(91), uint8(229),
-            uint8(0) // Empty column_witness
-        );
-        
+
+    function getRealDecommitments() internal pure returns (MerkleVerifier.Decommitment[] memory decommitments) {
+
+        decommitments = new MerkleVerifier.Decommitment[](3);
+
+        // bytes[] memory decommitments = new bytes[](3);
+
+        decommitments[0] = MerkleVerifier.Decommitment({
+            hashWitness: new bytes32[](0),
+            columnWitness: new uint32[](0)
+        });
+
+        bytes32[] memory hashWitness1 = new bytes32[](5);
+        hashWitness1[0] = 0x256d4681eaaeb89966ad0e2b4a47d523ad2d296eca8e0a39ebec52692ca54a5b;
+        hashWitness1[1] = 0x256d4681eaaeb89966ad0e2b4a47d523ad2d296eca8e0a39ebec52692ca54a5b;
+        hashWitness1[2] = 0x173de5b95b94db69a785629e3731bfa68adfab1fddb0b95a9925c65dc599ce13;
+        hashWitness1[3] = 0x173de5b95b94db69a785629e3731bfa68adfab1fddb0b95a9925c65dc599ce13;
+        hashWitness1[4] = 0x9b436975ff564f4b2bd0b0d3b26da6a634865292730eb879c390cb233a1a2a5a;
+
+        bytes32[] memory hashWitness2 = new bytes32[](6);
+        hashWitness2[0] = 0xabca40c11c52360f09f4b0c9e76646707b69cabb9f3b3bf35d081d200ddc2732;
+        hashWitness2[1] = 0x325c50a7c9ba307628e5f0a9bd5bef6688ad312d0d1b64ee6ccf3fadd0f82a24;
+        hashWitness2[2] = 0x325c50a7c9ba307628e5f0a9bd5bef6688ad312d0d1b64ee6ccf3fadd0f82a24;
+        hashWitness2[3] = 0x3a086d2cd5bc6252e4a177b34cddd3f29b0f535f6e7c7b2cb4e9b2d803c8ab3a;
+        hashWitness2[4] = 0x3a086d2cd5bc6252e4a177b34cddd3f29b0f535f6e7c7b2cb4e9b2d803c8ab3a;
+        hashWitness2[5] = 0x2f9d9e907a6a06980132e497c14828775b0e7695cc2c7ee228b609463cd65be5;
+
+        decommitments[1] = MerkleVerifier.Decommitment({
+            hashWitness: hashWitness1,
+            columnWitness: new uint32[](0)
+        });
+
+        decommitments[2] = MerkleVerifier.Decommitment({
+            hashWitness: hashWitness2,
+            columnWitness: new uint32[](0)
+        });
         return decommitments;
     }
 
