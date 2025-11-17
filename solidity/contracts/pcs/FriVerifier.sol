@@ -698,12 +698,11 @@ library FriVerifier {
 
         // Group by log size and process each group
         // In Rust this is: .group_by(|(log_size, ..)| *log_size).into_iter().map(...).collect()
-        // Each group produces one Vec<SecureField>, so we have as many columns as unique log sizes
-
+        // However, we need to maintain the original column structure for firstLayerQueryEvals
+        
         friAnswers = new QM31Field.QM31[][](
             queryPositionsByLogSize.logSizes.length
         );
-        uint256 columnIndex = 0;
 
         // Create mutable iterator state for queried values
         QueriedValuesIterator memory queriedValuesIter = QueriedValuesIterator({
@@ -711,14 +710,13 @@ library FriVerifier {
             positions: new uint256[](queriedValues.length)
         });
 
-        // Process each unique log size in descending order (to match Rust Reverse sorting)
+        // Process each log size in descending order (to match Rust Reverse sorting)
         for (uint256 i = 0; i < queryPositionsByLogSize.logSizes.length; i++) {
-            uint256 logSizeIdx = queryPositionsByLogSize.logSizes.length -
-                1 -
-                i;
-            uint32 logSize = queryPositionsByLogSize.logSizes[logSizeIdx];
+            // Reverse index to get descending order (largest log_size first)
+            uint256 reverseIdx = queryPositionsByLogSize.logSizes.length - 1 - i;
+            uint32 logSize = queryPositionsByLogSize.logSizes[reverseIdx];
             uint256[] memory queryPositions = queryPositionsByLogSize
-                .queryPositions[logSizeIdx];
+                .queryPositions[reverseIdx];
 
             // Get samples for this log size
             PointSample[][] memory samplesForLogSize = _getSamplesForLogSize(
@@ -745,8 +743,7 @@ library FriVerifier {
             );
 
             // Store this group's answers as one column
-            friAnswers[columnIndex] = answersForLogSize;
-            columnIndex++;
+            friAnswers[i] = answersForLogSize;
         }
     }
 
@@ -916,9 +913,33 @@ library FriVerifier {
         uint32[][] memory columnLogSizes,
         PointSample[][][] memory samples
     ) private pure returns (LogSizeAndSamples[] memory pairs) {
-        // Implementation would flatten the tree structure and create pairs
-        // This is a simplified placeholder - full implementation would handle the complex tree flattening
-        pairs = new LogSizeAndSamples[](0);
+        // Flatten column_log_sizes: TreeVec<Vec<u32>> -> ColumnVec<u32>
+        uint256 totalLogSizes = 0;
+        for (uint256 i = 0; i < columnLogSizes.length; i++) {
+            totalLogSizes += columnLogSizes[i].length;
+        }
+        
+        // Flatten samples: TreeVec<Vec<Vec<PointSample>>> -> ColumnVec<Vec<PointSample>>
+        uint256 totalSampleVecs = 0;
+        for (uint256 i = 0; i < samples.length; i++) {
+            totalSampleVecs += samples[i].length;
+        }
+        
+        require(totalLogSizes == totalSampleVecs, "Mismatch between log sizes and samples count");
+        
+        // Create pairs equivalent to izip!(column_log_sizes.flatten(), samples.flatten().iter())
+        pairs = new LogSizeAndSamples[](totalLogSizes);
+        
+        uint256 pairIndex = 0;
+        for (uint256 treeIdx = 0; treeIdx < columnLogSizes.length; treeIdx++) {
+            for (uint256 colIdx = 0; colIdx < columnLogSizes[treeIdx].length; colIdx++) {
+                pairs[pairIndex] = LogSizeAndSamples({
+                    logSize: columnLogSizes[treeIdx][colIdx],
+                    samples: samples[treeIdx][colIdx]
+                });
+                pairIndex++;
+            }
+        }
     }
 
     function _sortByLogSizeDescending(
@@ -940,8 +961,63 @@ library FriVerifier {
         LogSizeAndSamples[] memory flattenedData,
         uint32 logSize
     ) private pure returns (PointSample[][] memory samplesForLogSize) {
-        // Extract samples matching the given log size
-        samplesForLogSize = new PointSample[][](0);
+        // Count samples matching the given log size (equivalent to group_by in Rust)
+        uint256 matchCount = 0;
+        for (uint256 i = 0; i < flattenedData.length; i++) {
+            if (flattenedData[i].logSize == logSize) {
+                matchCount++;
+            }
+        }
+        
+        // Extract samples matching the given log size (equivalent to multiunzip(tuples))
+        samplesForLogSize = new PointSample[][](matchCount);
+        uint256 matchIndex = 0;
+        for (uint256 i = 0; i < flattenedData.length; i++) {
+            if (flattenedData[i].logSize == logSize) {
+                samplesForLogSize[matchIndex] = flattenedData[i].samples;
+                matchIndex++;
+            }
+        }
+    }
+
+    function _getUniqueLogSizesDescending(
+        LogSizeAndSamples[] memory flattenedData
+    ) private pure returns (uint32[] memory uniqueLogSizes) {
+        if (flattenedData.length == 0) {
+            return new uint32[](0);
+        }
+
+        // Count unique log sizes
+        uint256 uniqueCount = 1;
+        for (uint256 i = 1; i < flattenedData.length; i++) {
+            if (flattenedData[i].logSize != flattenedData[i - 1].logSize) {
+                uniqueCount++;
+            }
+        }
+
+        // Extract unique log sizes
+        uniqueLogSizes = new uint32[](uniqueCount);
+        uniqueLogSizes[0] = flattenedData[0].logSize;
+        uint256 idx = 1;
+        for (uint256 i = 1; i < flattenedData.length; i++) {
+            if (flattenedData[i].logSize != flattenedData[i - 1].logSize) {
+                uniqueLogSizes[idx] = flattenedData[i].logSize;
+                idx++;
+            }
+        }
+    }
+
+    function _getQueryPositionsForLogSize(
+        QueryPositionsByLogSize memory queryPositionsByLogSize,
+        uint32 logSize
+    ) private pure returns (uint256[] memory queryPositions) {
+        // Find the query positions for this log size
+        for (uint256 i = 0; i < queryPositionsByLogSize.logSizes.length; i++) {
+            if (queryPositionsByLogSize.logSizes[i] == logSize) {
+                return queryPositionsByLogSize.queryPositions[i];
+            }
+        }
+        return new uint256[](0);
     }
 
     function _getNColumnsForLogSize(
