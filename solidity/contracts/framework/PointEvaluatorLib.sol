@@ -185,10 +185,10 @@ library PointEvaluatorLib {
 
     /// @notice Get preprocessed column value
     /// @param self The PointEvaluator struct
-    /// @param columnId Column identifier (unused in current implementation)
+    /// @param _columnId Column identifier (unused in current implementation)
     /// @return updatedSelf Modified PointEvaluator struct with advanced state
     /// @return columnValue Preprocessed column value
-    function getPreprocessedColumn(PointEvaluator memory self, uint256 columnId) 
+    function getPreprocessedColumn(PointEvaluator memory self, uint256 _columnId) 
         internal 
         pure 
         returns (PointEvaluator memory updatedSelf, QM31Field.QM31 memory columnValue)

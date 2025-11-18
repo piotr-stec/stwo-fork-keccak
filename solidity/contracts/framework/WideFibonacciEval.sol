@@ -103,23 +103,6 @@ contract WideFibonacciEval is IFrameworkEval {
         return eval;
     }
 
-    /// @inheritdoc IFrameworkEval
-    function getEvalInfo()
-        external
-        view
-        override
-        returns (
-            string memory componentName,
-            uint256 nConstraints_,
-            string memory description
-        )
-    {
-        componentName = COMPONENT_NAME;
-        // Number of constraints = nColumns - 2 (since we need at least f(0), f(1) to start)
-        nConstraints_ = nColumns >= 2 ? nColumns - 2 : 0;
-        description = DESCRIPTION;
-    }
-
     // =============================================================================
     // Additional Getters
     // =============================================================================

@@ -28,20 +28,5 @@ interface IFrameworkEval {
     /// @return updatedEval The evaluator after constraint evaluation
     function evaluate(PointEvaluatorLib.PointEvaluator memory eval) external returns (PointEvaluatorLib.PointEvaluator memory updatedEval);
 
-    // =============================================================================
-    // Additional Metadata
-    // =============================================================================
 
-    /// @notice Get evaluation metadata for this component
-    /// @return componentName Human-readable component name
-    /// @return nConstraints Number of constraints this evaluation generates
-    /// @return description Description of the constraints
-    function getEvalInfo()
-        external
-        view
-        returns (
-            string memory componentName,
-            uint256 nConstraints,
-            string memory description
-        );
 }
