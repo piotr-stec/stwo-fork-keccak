@@ -1412,7 +1412,6 @@ library FriVerifier {
             bool firstLayerSuccess,
             SparseEvaluation[] memory firstLayerSparseEvals
         ) = decommitFirstLayer(friVerifierState, queries, firstLayerQueryEvals);
-        console.log("First layer decommitment success:", firstLayerSuccess);
         if (!firstLayerSuccess) {
             revert(
                 "FRI decommit failed at STEP 1: First layer verification failed"
@@ -1435,7 +1434,6 @@ library FriVerifier {
                 innerLayerQueries,
                 firstLayerSparseEvals
             );
-        console.log("Inner layers decommitment success:", innerLayersSuccess);
         if (!innerLayersSuccess) {
             revert("FRI decommit failed at STEP 3: Inner layers verification failed");
         }
@@ -1443,7 +1441,6 @@ library FriVerifier {
 
         // Step 4: Verify last layer
         bool lastLayerSuccess = decommitLastLayer(friVerifierState, lastLayerQueries, lastLayerQueryEvals);
-        console.log("Last layer decommitment success:", lastLayerSuccess);
         if (!lastLayerSuccess) {
             revert("FRI decommit failed at STEP 4: Last layer verification failed");
         }
@@ -1554,30 +1551,30 @@ library FriVerifier {
             );
             console.log("columnLogSize:", columnLogSize);
             console.log("foldSteps:", foldSteps);
-            console.log(
-                "columnQueries.logDomainSize:",
-                columnQueries.logDomainSize
-            );
-            console.log(
-                "columnQueries.positions.length:",
-                columnQueries.positions.length
-            );
-            for (uint256 i = 0; i < columnQueries.positions.length; i++) {
-                console.log(
-                    "  columnQueries.positions[%d]:",
-                    i,
-                    columnQueries.positions[i]
-                );
-            }
-            console.log("columnQueryEvals.length:", columnQueryEvals.length);
-            for (uint256 i = 0; i < columnQueryEvals.length; i++) {
-                console.log("  columnQueryEvals[%d]:", i);
-                console.log(columnQueryEvals[i].first.real);
-                console.log(columnQueryEvals[i].first.imag);
-                console.log(columnQueryEvals[i].second.real);
-                console.log(columnQueryEvals[i].second.imag);
-            }
-            console.log("=== END Column %d ===\n", colIdx);
+            // console.log(
+            //     "columnQueries.logDomainSize:",
+            //     columnQueries.logDomainSize
+            // );
+            // console.log(
+            //     "columnQueries.positions.length:",
+            //     columnQueries.positions.length
+            // );
+            // for (uint256 i = 0; i < columnQueries.positions.length; i++) {
+            //     console.log(
+            //         "  columnQueries.positions[%d]:",
+            //         i,
+            //         columnQueries.positions[i]
+            //     );
+            // }
+            // console.log("columnQueryEvals.length:", columnQueryEvals.length);
+            // for (uint256 i = 0; i < columnQueryEvals.length; i++) {
+            //     console.log("  columnQueryEvals[%d]:", i);
+            //     console.log(columnQueryEvals[i].first.real);
+            //     console.log(columnQueryEvals[i].first.imag);
+            //     console.log(columnQueryEvals[i].second.real);
+            //     console.log(columnQueryEvals[i].second.imag);
+            // }
+            // console.log("=== END Column %d ===\n", colIdx);
 
             // Compute decommitment positions and rebuild evals
             (
@@ -1676,38 +1673,9 @@ library FriVerifier {
         // Sort queriesPerLogSize by logSize in ascending order to match Rust behavior
         _sortQueriesPerLogSizeAscending(queriesPerLogSize);
 
-        // // Debug: Print queriesPerLogSize
-        // console.log("\n=== DEBUG: queriesPerLogSize ===");
-        // console.log("numUniqueLogSizes:", numUniqueLogSizes);
-        // for (uint256 i = 0; i < queriesPerLogSize.length; i++) {
-        //     console.log("  [%d] logSize:", i, queriesPerLogSize[i].logSize);
-        //     console.log(
-        //         "      queries.length:",
-        //         queriesPerLogSize[i].queries.length
-        //     );
-        //     for (uint256 j = 0; j < queriesPerLogSize[i].queries.length; j++) {
-        //         console.log(
-        //             "        query[%d]:",
-        //             j,
-        //             queriesPerLogSize[i].queries[j]
-        //         );
-        //     }
-        // }
-        // console.log("=== END queriesPerLogSize ===\n");
-        
-        // // Debug: Print decommittedValues
-        // console.log("=== DEBUG: decommittedValues ===");
-        // console.log("decommittedValues.length:", decommittedValues.length);
-        // uint256 printLimit = 48;
-        // for (uint256 i = 0; i < printLimit; i++) {
-        //     console.log("  [%d]:", i, decommittedValues[i]);
-        // }
-        // if (decommittedValues.length > printLimit) {
-        //     console.log("  ... (%d more values)", decommittedValues.length - printLimit);
-        // }
-        // console.log("=== END decommittedValues ===\n");
 
         console.log("Verfiingh first layer merkle proof");
+        
         // Verify Merkle proof
         MerkleVerifier.verify(
             verifier,
@@ -1815,6 +1783,7 @@ library FriVerifier {
                         .firstLayer
                         .columnCommitmentDomains[columnBoundIndex];
 
+
                 QM31Field.QM31[]
                     memory foldedColumnEvals = foldCircleSparseEvals(
                         firstLayerSparseEvals[sparseEvalsIndex],
@@ -1822,7 +1791,8 @@ library FriVerifier {
                         columnDomain
                     );
 
-                accumulateLine(
+                // Update layerQueryEvals with accumulated values
+                layerQueryEvals = accumulateLine(
                     layerQueryEvals,
                     foldedColumnEvals,
                     previousFoldingAlpha
@@ -1882,13 +1852,6 @@ library FriVerifier {
         // Create line domain for last layer (matches Rust LineDomain)
         CosetM31.CosetStruct memory domain = friVerifierState.lastLayerDomain;
 
-        console.log("Debug domain");
-        console.log("Domain initial index", domain.initialIndex.value);
-        console.log("Domain initial x", domain.initial.x);
-        console.log("Domain initial y", domain.initial.y);
-
-
-
         // Verify each query evaluation
         // Rust: for (&query, query_eval) in zip(&*queries, query_evals)
         for (uint256 i = 0; i < queries.positions.length; i++) {
@@ -1915,6 +1878,9 @@ library FriVerifier {
                 lastLayerPoly,
                 xAsQM31
             );
+
+            console.log("Expected evaluation", expectedEval.first.real, expectedEval.first.imag);
+            console.log("Provided evaluation",  expectedEval.second.real, expectedEval.second.imag);
 
             // Compare with provided evaluation
             if (!QM31Field.eq(queryEval, expectedEval)) {
@@ -1966,6 +1932,7 @@ library FriVerifier {
         QM31Field.QM31 memory foldingAlpha,
         CircleDomain.CircleDomainStruct memory columnDomain
     ) internal pure returns (QM31Field.QM31[] memory foldedEvals) {
+        
         // Result has one value per subset (matches Rust: .map().collect())
         foldedEvals = new QM31Field.QM31[](sparseEval.subsetEvals.length);
 
@@ -1978,7 +1945,7 @@ library FriVerifier {
 
             // Get the domain point at the initial index
             // Rust: let fold_domain_initial = source_domain.index_at(domain_initial_index);
-            CirclePointM31.Point memory foldDomainInitial = CircleDomain.at(
+            CosetM31.CirclePointIndex memory foldDomainInitial = CircleDomain.indexAt(
                 columnDomain,
                 domainInitialIndex
             );
@@ -1996,26 +1963,64 @@ library FriVerifier {
                 buffer[j] = QM31Field.zero();
             }
 
+            // Create fold domain for this subset
+            // Rust: CircleDomain::new(Coset::new(fold_domain_initial, CIRCLE_TO_LINE_FOLD_STEP - 1))
+            // Since CIRCLE_TO_LINE_FOLD_STEP = 1, log_size = 0, which means single point domain
+            // For log_size = 0, step_size = subgroup_gen(0) = identity index (0)
+       
+            CosetM31.CosetStruct memory foldDomainCoset = CosetM31.newCoset(
+                foldDomainInitial,
+                0 
+            );
+            
+            CircleDomain.CircleDomainStruct memory foldDomain = CircleDomain.CircleDomainStruct({
+                halfCoset: foldDomainCoset
+            });
+
             // Fold circle into line
             // Rust: fold_circle_into_line(&mut buffer, &eval, fold_domain, fold_alpha);
-            _foldCircleIntoLineForSubset(buffer, subsetEval, foldingAlpha);
+            foldedEvals[i] = _foldCircleIntoLineForSubset(buffer, subsetEval, foldDomain, foldingAlpha);
 
-            // Take first element of buffer (the folded value)
-            // Rust: buffer[0]
-            foldedEvals[i] = buffer[0];
+        
         }
     }
 
     /// @notice Helper to fold a single subset's circle evaluations into line
-    /// @dev Simplified version of fold_circle_into_line for single subset
+    /// @dev Full implementation of fold_circle_into_line matching Rust
     /// @param dst Destination buffer (modified in place)
     /// @param src Source evaluations from subset
+    /// @param srcDomain Source circle domain
     /// @param alpha Folding coefficient
     function _foldCircleIntoLineForSubset(
         QM31Field.QM31[] memory dst,
         QM31Field.QM31[] memory src,
+        CircleDomain.CircleDomainStruct memory srcDomain,
         QM31Field.QM31 memory alpha
-    ) private pure {
+    ) internal pure returns (QM31Field.QM31 memory) {
+        console.log("\n=== _foldCircleIntoLineForSubset ===");
+        for (uint256 i = 0; i < src.length; i++) {
+            console.log("  src[%d]:", i);
+            console.log("    first.real: %d", src[i].first.real);
+            console.log("    first.imag: %d", src[i].first.imag);
+            console.log("    second.real: %d", src[i].second.real);
+            console.log("    second.imag: %d", src[i].second.imag);
+        }
+        for (uint256 i = 0; i < dst.length ; i++) {
+            console.log("  dst[%d]:", i);
+            console.log("    first.real: %d", dst[i].first.real);
+            console.log("    first.imag: %d", dst[i].first.imag);
+            console.log("    second.real: %d", dst[i].second.real);
+            console.log("    second.imag: %d", dst[i].second.imag);
+        }
+        // circle domain print
+        console.log("  srcDomain.initialIndex.value:", srcDomain.halfCoset.initialIndex.value);
+        console.log("  srcDomain.initial.x:", srcDomain.halfCoset.initial.x);
+        console.log("  srcDomain.initial.y:", srcDomain.halfCoset.initial.y);
+        console.log("  srcDomain.stepSize.value:", srcDomain.halfCoset.stepSize.value);
+        console.log("  srcDomain.step.x:", srcDomain.halfCoset.step.x);
+        console.log("  srcDomain.step.y:", srcDomain.halfCoset.step.y);
+        console.log("  srcDomain.logSize:", srcDomain.halfCoset.logSize);
+        
         // Rust: assert_eq!(src.len() >> CIRCLE_TO_LINE_FOLD_STEP, dst.len());
         require(
             src.length >> CIRCLE_TO_LINE_FOLD_STEP == dst.length,
@@ -2024,53 +2029,163 @@ library FriVerifier {
 
         // Rust: let alpha_sq = alpha * alpha;
         QM31Field.QM31 memory alphaSq = QM31Field.mul(alpha, alpha);
+        console.log("alphaSq calculated");
 
         // Fold pairs: (f_p, f_neg_p) -> f_prime
         // Rust: src.iter().tuples().enumerate().for_each(|(i, (&f_p, &f_neg_p))| { ... })
-        for (uint256 i = 0; i < src.length; i += 2) {
-            QM31Field.QM31 memory f_p = src[i];
-            QM31Field.QM31 memory f_neg_p = src[i + 1];
+        for (uint256 i = 0; i < src.length / 2; i++) {
+            QM31Field.QM31 memory f_p = src[i * 2];
+            QM31Field.QM31 memory f_neg_p = src[i * 2 + 1];
 
-            // Compute f0 = (f_p + f_neg_p) / 2 and f1 = (f_p - f_neg_p) / 2
-            // Then f_prime = f0 (since we're folding to constant)
-            // Simplified: just take the even component
-            QM31Field.QM31 memory f_prime = QM31Field.add(f_p, f_neg_p);
-            // Note: In full implementation would need proper ibutterfly
+            console.log("\n  Pair [%d]:", i);
+            console.log("    f_p.first: (%d, %d)", f_p.first.real, f_p.first.imag);
+            console.log("    f_p.second: (%d, %d)", f_p.second.real, f_p.second.imag);
+            console.log("    f_neg_p.first: (%d, %d)", f_neg_p.first.real, f_neg_p.first.imag);
+            console.log("    f_neg_p.second: (%d, %d)", f_neg_p.second.real, f_neg_p.second.imag);
 
-            // Accumulate into dst: dst[i] = dst[i] * alpha_sq + f_prime
+            // Rust: let p = src_domain.at(bit_reverse_index(i << CIRCLE_TO_LINE_FOLD_STEP, src_domain.log_size()));
+            uint256 bitReversedIndex = _bitReverseIndex(
+                i << CIRCLE_TO_LINE_FOLD_STEP,
+                CircleDomain.logSize(srcDomain)
+            );
+            CirclePointM31.Point memory p = CircleDomain.at(srcDomain, bitReversedIndex);
+            
+            console.log("    p: (%d, %d)", p.x, p.y);
+            console.log("    bitReversedIndex:", bitReversedIndex);
+
+            // Rust: let (mut f0_px, mut f1_px) = (f_p, f_neg_p);
+            // Rust: ibutterfly(&mut f0_px, &mut f1_px, p.y.inverse());
+            uint32 p_y_inverse = M31Field.inverse(p.y);
+            console.log("    p.y.inverse():", p_y_inverse);
+            
+            // ibutterfly: (a, b) <- (a + b, (a - b) * twiddle_inverse)
+            (QM31Field.QM31 memory f0_px, QM31Field.QM31 memory f1_px) = _ibutterfly(f_p, f_neg_p, p_y_inverse);
+            
+            console.log("    After ibutterfly:");
+            console.log("      f0_px.first: (%d, %d)", f0_px.first.real, f0_px.first.imag);
+            console.log("      f0_px.second: (%d, %d)", f0_px.second.real, f0_px.second.imag);
+            console.log("      f1_px.first: (%d, %d)", f1_px.first.real, f1_px.first.imag);
+            console.log("      f1_px.second: (%d, %d)", f1_px.second.real, f1_px.second.imag);
+
+            // Rust: let f_prime = alpha * f1_px + f0_px;
+            QM31Field.QM31 memory alpha_mul_f1 = QM31Field.mul(alpha, f1_px);
+            QM31Field.QM31 memory f_prime = QM31Field.add(alpha_mul_f1, f0_px);
+            
+            console.log("    f_prime.first: (%d, %d)", f_prime.first.real, f_prime.first.imag);
+            console.log("    f_prime.second: (%d, %d)", f_prime.second.real, f_prime.second.imag);
+
             // Rust: dst[i] = dst[i] * alpha_sq + f_prime;
-            uint256 dstIdx = i / 2;
-            dst[dstIdx] = QM31Field.add(
-                QM31Field.mul(dst[dstIdx], alphaSq),
+            dst[i] = QM31Field.add(
+                QM31Field.mul(dst[i], alphaSq),
                 f_prime
             );
+            
+            console.log("    dst[%d].first: (%d, %d)", i, dst[i].first.real, dst[i].first.imag);
+            console.log("    dst[%d].second: (%d, %d)", i, dst[i].second.real, dst[i].second.imag);
         }
+        console.log("=== END _foldCircleIntoLineForSubset ===\n");
+        return dst[0]; // Since dst size is 1, return the single folded evaluation
+    }
+    
+    /// @notice Inverse butterfly operation for QM31 field elements
+    /// @dev Matches Rust ibutterfly: (a, b) <- (a + b, (a - b) * twiddle_inverse)
+    /// @param a First element (modified in place - but Solidity doesn't support this, so we'll need workaround)
+    /// @param b Second element (modified in place)
+    /// @param twiddleInverse Twiddle factor inverse (M31)
+    function _ibutterfly(
+        QM31Field.QM31 memory a,
+        QM31Field.QM31 memory b,
+        uint32 twiddleInverse
+    ) private pure returns (QM31Field.QM31 memory, QM31Field.QM31 memory) {
+        // Rust: *a, *b = *a + *b, (*a - *b) * twiddle_inverse
+        QM31Field.QM31 memory sum = QM31Field.add(a, b);
+        QM31Field.QM31 memory diff = QM31Field.sub(a, b);
+        QM31Field.QM31 memory twiddleQM31 = QM31Field.fromM31(twiddleInverse, 0, 0, 0);
+        QM31Field.QM31 memory diffMulTwiddle = QM31Field.mul(diff, twiddleQM31);
+        
+        return (sum, diffMulTwiddle);
     }
 
     /// @notice Accumulates line evaluations with a folding alpha
-    /// @param layerQueryEvals Existing layer query evaluations (modified in place)
+    /// @dev Matches Rust accumulate_line: layer_query_evals *= alpha^2, then += column_query_evals
+    /// @param layerQueryEvals Existing layer query evaluations
     /// @param foldedColumnEvals Folded column evaluations to accumulate
     /// @param foldingAlpha Folding coefficient
+    /// @return Updated layer query evaluations
     function accumulateLine(
         QM31Field.QM31[] memory layerQueryEvals,
         QM31Field.QM31[] memory foldedColumnEvals,
         QM31Field.QM31 memory foldingAlpha
-    ) internal pure {
+    ) internal pure returns (QM31Field.QM31[] memory) {
+                for (uint256 i = 0; i < foldedColumnEvals.length; i++) {
+                               console.log(" ACCUMULATELINE INPUT   BEFORE foldedColumnEvals[%d]:", i);
+                    console.log("      first.real: %d", foldedColumnEvals[i].first.real);
+                    console.log("      first.imag: %d", foldedColumnEvals[i].first.imag);
+                    console.log("      second.real: %d", foldedColumnEvals[i].second.real);
+                    console.log("      second.imag: %d", foldedColumnEvals[i].second.imag);
+                }
+
+        // console.log("\n=== accumulateLine INPUT ===");
+        // console.log("layerQueryEvals.length:", layerQueryEvals.length);
+        // console.log("foldedColumnEvals.length:", foldedColumnEvals.length);
+        // console.log("foldingAlpha:");
+        // console.log("  first.real: %d", foldingAlpha.first.real);
+        // console.log("  first.imag: %d", foldingAlpha.first.imag);
+        // console.log("  second.real: %d", foldingAlpha.second.real);
+        // console.log("  second.imag: %d", foldingAlpha.second.imag);
+        
         require(
             layerQueryEvals.length == foldedColumnEvals.length,
             "Array length mismatch"
         );
 
+        QM31Field.QM31 memory foldingAlphaSquared = QM31Field.mul(foldingAlpha, foldingAlpha);
+        // console.log("foldingAlphaSquared = foldingAlpha^2:");
+        // console.log("  first.real: %d", foldingAlphaSquared.first.real);
+        // console.log("  first.imag: %d", foldingAlphaSquared.first.imag);
+        // console.log("  second.real: %d", foldingAlphaSquared.second.real);
+        // console.log("  second.imag: %d", foldingAlphaSquared.second.imag);
+
         for (uint256 i = 0; i < layerQueryEvals.length; i++) {
-            QM31Field.QM31 memory contribution = QM31Field.mul(
-                foldedColumnEvals[i],
-                foldingAlpha
-            );
+            // console.log("\n  Processing element [%d]:", i);
+            
+            // // Print original layerQueryEvals[i]
+            // console.log("    BEFORE layerQueryEvals[%d]:", i);
+            // console.log("      first.real: %d", layerQueryEvals[i].first.real);
+            // console.log("      first.imag: %d", layerQueryEvals[i].first.imag);
+            // console.log("      second.real: %d", layerQueryEvals[i].second.real);
+            // console.log("      second.imag: %d", layerQueryEvals[i].second.imag);
+            
+            // console.log("    foldedColumnEvals[%d]:", i);
+            // console.log("      first.real: %d", foldedColumnEvals[i].first.real);
+            // console.log("      first.imag: %d", foldedColumnEvals[i].first.imag);
+            // console.log("      second.real: %d", foldedColumnEvals[i].second.real);
+            // console.log("      second.imag: %d", foldedColumnEvals[i].second.imag);
+            
+            // // Rust: *curr_layer_eval *= folding_alpha_squared;
+            layerQueryEvals[i] = QM31Field.mul(layerQueryEvals[i], foldingAlphaSquared);
+            
+            // console.log("    AFTER *= alpha^2:");
+            // console.log("      first.real: %d", layerQueryEvals[i].first.real);
+            // console.log("      first.imag: %d", layerQueryEvals[i].first.imag);
+            // console.log("      second.real: %d", layerQueryEvals[i].second.real);
+            // console.log("      second.imag: %d", layerQueryEvals[i].second.imag);
+            
+            // Rust: *curr_layer_eval += *folded_column_eval;
             layerQueryEvals[i] = QM31Field.add(
                 layerQueryEvals[i],
-                contribution
+                foldedColumnEvals[i]
             );
+            
+        //     console.log("    AFTER += foldedColumnEvals:");
+        //     console.log("      first.real: %d", layerQueryEvals[i].first.real);
+        //     console.log("      first.imag: %d", layerQueryEvals[i].first.imag);
+        //     console.log("      second.real: %d", layerQueryEvals[i].second.real);
+        //     console.log("      second.imag: %d", layerQueryEvals[i].second.imag);
         }
+        
+        // console.log("=== END accumulateLine ===\n");
+        return layerQueryEvals;
     }
 
     /// @notice Folds line sparse evaluations (matches Rust SparseEvaluation::fold_line)
@@ -2206,6 +2321,11 @@ library FriVerifier {
             QM31Field.QM31[] memory newQueryEvals
         )
     {
+        for (uint i = 0; i< layerQueries.positions.length; i++) {
+            console.log("Layer query position[%d]: %d", i, layerQueries.positions[i]);
+        }
+        console.log("Log domain size", layerQueries.logDomainSize);
+
 
         // Rust: assert_eq!(queries.log_domain_size, self.domain.log_size());
         require(
@@ -2229,6 +2349,36 @@ library FriVerifier {
                 witnessIter,
                 FOLD_STEP
             );
+
+        // Debug: Print SparseEvaluation after computeDecommitmentPositionsAndRebuildEvals
+        console.log("\n=== SPARSE EVALUATION AFTER computeDecommitmentPositionsAndRebuildEvals ===");
+        console.log("decommitmentPositions.length:", decommitmentPositions.length);
+        for (uint256 i = 0; i < decommitmentPositions.length && i < 10; i++) {
+            console.log("  decommitmentPositions[%d]: %d", i, decommitmentPositions[i]);
+        }
+        if (decommitmentPositions.length > 10) {
+            console.log("  ... (%d more positions)", decommitmentPositions.length - 10);
+        }
+        
+        console.log("sparseEvaluation.subsetEvals.length:", sparseEvaluation.subsetEvals.length);
+        for (uint256 i = 0; i < sparseEvaluation.subsetEvals.length; i++) {
+            console.log("  Subset %d:", i);
+            console.log("    subsetEvals[%d].length: %d", i, sparseEvaluation.subsetEvals[i].length);
+            console.log("    subsetDomainIndexInitials[%d]: %d", i, sparseEvaluation.subsetDomainIndexInitials[i]);
+            
+            // Print first few QM31 values in this subset
+            for (uint256 j = 0; j < sparseEvaluation.subsetEvals[i].length && j < 3; j++) {
+                console.log("      subsetEvals[%d][%d]:", i, j);
+                console.log("        first.real: %d", sparseEvaluation.subsetEvals[i][j].first.real);
+                console.log("        first.imag: %d", sparseEvaluation.subsetEvals[i][j].first.imag);
+                console.log("        second.real: %d", sparseEvaluation.subsetEvals[i][j].second.real);
+                console.log("        second.imag: %d", sparseEvaluation.subsetEvals[i][j].second.imag);
+            }
+            if (sparseEvaluation.subsetEvals[i].length > 3) {
+                console.log("      ... (%d more values)", sparseEvaluation.subsetEvals[i].length - 3);
+            }
+        }
+        console.log("=== END SPARSE EVALUATION ===\n");
 
         // Rust: Check all proof evals have been consumed
         if (witnessIter.index != witnessIter.witness.length) {
@@ -2279,6 +2429,55 @@ library FriVerifier {
             logSize: layer.domain.logSize,
             queries: decommitmentPositions
         });
+
+             // Debug: Print verifier details
+        console.log("\n=== MERKLE VERIFIER INPUT DEBUG ===");
+        console.log("verifier.root:");
+        console.logBytes32(verifier.root);
+        console.log("verifier.columnLogSizes.length:", verifier.columnLogSizes.length);
+        for (uint256 i = 0; i < verifier.columnLogSizes.length; i++) {
+            console.log("  columnLogSizes[%d]: %d", i, verifier.columnLogSizes[i]);
+        }
+        
+        // Debug: Print queriesPerLogSize
+        console.log("queriesPerLogSize.length:", queriesPerLogSize.length);
+        for (uint256 i = 0; i < queriesPerLogSize.length; i++) {
+            console.log("  queriesPerLogSize[%d].logSize: %d", i, queriesPerLogSize[i].logSize);
+            console.log("  queriesPerLogSize[%d].queries.length: %d", i, queriesPerLogSize[i].queries.length);
+            for (uint256 j = 0; j < queriesPerLogSize[i].queries.length; j++) {
+                console.log("    queries[%d]: %d", j, queriesPerLogSize[i].queries[j]);
+            }
+        }
+        
+        // Debug: Print decommittedValues
+        console.log("decommittedValues.length:", decommittedValues.length);
+        for (uint256 i = 0; i < decommittedValues.length && i < 20; i++) { // First 20 values
+            console.log("  decommittedValues[%d]: %d", i, decommittedValues[i]);
+        }
+        if (decommittedValues.length > 20) {
+            console.log("  ... (%d more values)", decommittedValues.length - 20);
+        }
+        
+        // Debug: Print decommitment details
+        console.log("decommitment.hashWitness.length:", decommitment.hashWitness.length);
+        for (uint256 i = 0; i < decommitment.hashWitness.length && i < 10; i++) { // First 10 hashes
+            console.log("  hashWitness[%d]:", i);
+            console.logBytes32(decommitment.hashWitness[i]);
+        }
+        if (decommitment.hashWitness.length > 10) {
+            console.log("  ... (%d more hashes)", decommitment.hashWitness.length - 10);
+        }
+        
+        console.log("decommitment.columnWitness.length:", decommitment.columnWitness.length);
+        for (uint256 i = 0; i < decommitment.columnWitness.length && i < 20; i++) { // First 20 values
+            console.log("  columnWitness[%d]: %d", i, decommitment.columnWitness[i]);
+        }
+        if (decommitment.columnWitness.length > 20) {
+            console.log("  ... (%d more values)", decommitment.columnWitness.length - 20);
+        }
+        console.log("=== END MERKLE VERIFIER INPUT DEBUG ===\n");
+        
+
 
         // Verify - MerkleVerifier.verify will revert on failure
         MerkleVerifier.verify(
@@ -2635,6 +2834,44 @@ library FriVerifier {
             SparseEvaluation memory sparseEval
         )
     {
+        // Debug: Print input parameters
+        console.log("\n=== computeDecommitmentPositionsAndRebuildEvals INPUT ===");
+        console.log("foldStep:", foldStep);
+        console.log("queries.logDomainSize:", queries.logDomainSize);
+        console.log("queries.positions.length:", queries.positions.length);
+        for (uint256 i = 0; i < queries.positions.length && i < 10; i++) {
+            console.log("  queries.positions[%d]: %d", i, queries.positions[i]);
+        }
+        if (queries.positions.length > 10) {
+            console.log("  ... (%d more positions)", queries.positions.length - 10);
+        }
+        
+        console.log("queryEvals.length:", queryEvals.length);
+        for (uint256 i = 0; i < queryEvals.length && i < 5; i++) {
+            console.log("  queryEvals[%d]:", i);
+            console.log("    first.real: %d", queryEvals[i].first.real);
+            console.log("    first.imag: %d", queryEvals[i].first.imag);
+            console.log("    second.real: %d", queryEvals[i].second.real);
+            console.log("    second.imag: %d", queryEvals[i].second.imag);
+        }
+        if (queryEvals.length > 5) {
+            console.log("  ... (%d more evals)", queryEvals.length - 5);
+        }
+        
+        console.log("witnessIter.witness.length:", witnessIter.witness.length);
+        console.log("witnessIter.index:", witnessIter.index);
+        for (uint256 i = witnessIter.index; i < witnessIter.witness.length && i < witnessIter.index + 5; i++) {
+            console.log("  witnessIter.witness[%d]:", i);
+            console.log("    first.real: %d", witnessIter.witness[i].first.real);
+            console.log("    first.imag: %d", witnessIter.witness[i].first.imag);
+            console.log("    second.real: %d", witnessIter.witness[i].second.real);
+            console.log("    second.imag: %d", witnessIter.witness[i].second.imag);
+        }
+        if (witnessIter.witness.length > witnessIter.index + 5) {
+            console.log("  ... (%d more witness values)", witnessIter.witness.length - witnessIter.index - 5);
+        }
+        console.log("=== END INPUT ===\n");
+
         require(
             queries.positions.length == queryEvals.length,
             "Query/eval length mismatch"
