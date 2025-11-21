@@ -687,22 +687,26 @@ library FriVerifier {
         uint32[][] memory queriedValues, // TreeVec<Vec<BaseField>> (BaseField = M31 = uint32)
         uint32[][][] memory nColumnsPerLogSize // TreeVec<&BTreeMap<u32, usize>>
     ) internal pure returns (QM31Field.QM31[][] memory friAnswers) {
+
         // Flatten column log sizes and create (logSize, samples) pairs
         LogSizeAndSamples[] memory flattenedData = _flattenAndCreatePairs(
             columnLogSizes,
             samples
         );
 
-        // Sort by log size in descending order (equivalent to sorted_by_key(Reverse(*log_size)))
-        _sortByLogSizeDescending(flattenedData);
+
+        // Sort by log size in DESCENDING order (matches Rust: sorted_by_key(|(log_size, ..)| Reverse(*log_size)))
+        _sortByLogSizeAscending(flattenedData);
 
         // Group by log size and process each group
         // In Rust this is: .group_by(|(log_size, ..)| *log_size).into_iter().map(...).collect()
-        // However, we need to maintain the original column structure for firstLayerQueryEvals
+        // We process in descending order (largest logSize first) after sorting
         
-        friAnswers = new QM31Field.QM31[][](
-            queryPositionsByLogSize.logSizes.length
-        );
+        // Get unique log sizes from flattened data in descending order
+        uint32[] memory uniqueLogSizes = _getUniqueLogSizesFromFlattened(flattenedData);
+
+        
+        friAnswers = new QM31Field.QM31[][](uniqueLogSizes.length);
 
         // Create mutable iterator state for queried values
         QueriedValuesIterator memory queriedValuesIter = QueriedValuesIterator({
@@ -710,13 +714,18 @@ library FriVerifier {
             positions: new uint256[](queriedValues.length)
         });
 
-        // Process each log size in descending order (to match Rust Reverse sorting)
-        for (uint256 i = 0; i < queryPositionsByLogSize.logSizes.length; i++) {
-            // Reverse index to get descending order (largest log_size first)
-            uint256 reverseIdx = queryPositionsByLogSize.logSizes.length - 1 - i;
-            uint32 logSize = queryPositionsByLogSize.logSizes[reverseIdx];
-            uint256[] memory queryPositions = queryPositionsByLogSize
-                .queryPositions[reverseIdx];
+        // Process each unique log size (already in descending order from sorting)
+        for (uint256 i = 0; i < uniqueLogSizes.length; i++) {
+            uint32 logSize = uniqueLogSizes[i];
+            
+            // Find this logSize in queryPositionsByLogSize
+            uint256[] memory queryPositions;
+            for (uint256 j = 0; j < queryPositionsByLogSize.logSizes.length; j++) {
+                if (queryPositionsByLogSize.logSizes[j] == logSize) {
+                    queryPositions = queryPositionsByLogSize.queryPositions[j];
+                    break;
+                }
+            }
 
             // Get samples for this log size
             PointSample[][] memory samplesForLogSize = _getSamplesForLogSize(
@@ -744,7 +753,11 @@ library FriVerifier {
 
             // Store this group's answers as one column
             friAnswers[i] = answersForLogSize;
+      
+            
         }
+
+
     }
 
     /// @notice Calculate FRI answers for a specific log size
@@ -768,14 +781,12 @@ library FriVerifier {
         ColumnSampleBatch[] memory sampleBatches = _createColumnSampleBatches(
             samples
         );
-
         // Calculate quotient constants
         QuotientConstants
             memory quotientConstants = _calculateQuotientConstants(
                 sampleBatches,
                 randomCoeff
             );
-
         // Create commitment domain
         CircleDomain.CircleDomainStruct
             memory commitmentDomain = _createCommitmentDomain(logSize);
@@ -807,6 +818,7 @@ library FriVerifier {
                 domainPoint
             );
         }
+
     }
 
     /// @notice Accumulate quotient contributions from all sample batches at a domain point
@@ -822,6 +834,8 @@ library FriVerifier {
         QuotientConstants memory quotientConstants,
         CirclePointM31.Point memory domainPoint
     ) internal pure returns (QM31Field.QM31 memory accumulator) {
+
+        
         // Calculate denominator inverses for all sample batches
         CM31Field.CM31[]
             memory denominatorInverses = _calculateDenominatorInverses(
@@ -863,10 +877,13 @@ library FriVerifier {
                     0,
                     0
                 );
+
                 QM31Field.QM31 memory value = QM31Field.mul(
                     queriedValue,
                     lineCoeffs[2] // c coefficient
                 );
+
+
 
                 // Calculate linear term: a * domain_point.y + b
                 QM31Field.QM31 memory linearTerm = QM31Field.add(
@@ -942,17 +959,52 @@ library FriVerifier {
         }
     }
 
-    function _sortByLogSizeDescending(
+    function _sortByLogSizeAscending(
         LogSizeAndSamples[] memory data
     ) private pure {
-        // Bubble sort by log size in descending order
+        // Bubble sort by log size in DESCENDING order (Reverse in Rust: sorted_by_key(|(log_size, ..)| Reverse(*log_size)))
         for (uint256 i = 0; i < data.length; i++) {
             for (uint256 j = 0; j < data.length - i - 1; j++) {
-                if (data[j].logSize < data[j + 1].logSize) {
+                if (data[j].logSize < data[j + 1].logSize) {  // Changed from > to < for descending
                     LogSizeAndSamples memory temp = data[j];
                     data[j] = data[j + 1];
                     data[j + 1] = temp;
                 }
+            }
+        }
+    }
+
+    /// @notice Get unique log sizes from flattened data (already sorted descending)
+    /// @param flattenedData Flattened and sorted data
+    /// @return uniqueLogSizes Array of unique log sizes in descending order
+    function _getUniqueLogSizesFromFlattened(
+        LogSizeAndSamples[] memory flattenedData
+    ) private pure returns (uint32[] memory uniqueLogSizes) {
+        if (flattenedData.length == 0) {
+            return new uint32[](0);
+        }
+
+        // Count unique log sizes
+        uint256 uniqueCount = 1;
+        uint32 prevLogSize = flattenedData[0].logSize;
+        for (uint256 i = 1; i < flattenedData.length; i++) {
+            if (flattenedData[i].logSize != prevLogSize) {
+                uniqueCount++;
+                prevLogSize = flattenedData[i].logSize;
+            }
+        }
+
+        // Extract unique log sizes (maintain descending order from sort)
+        uniqueLogSizes = new uint32[](uniqueCount);
+        uniqueLogSizes[0] = flattenedData[0].logSize;
+        uint256 uniqueIdx = 1;
+        prevLogSize = flattenedData[0].logSize;
+        
+        for (uint256 i = 1; i < flattenedData.length; i++) {
+            if (flattenedData[i].logSize != prevLogSize) {
+                uniqueLogSizes[uniqueIdx] = flattenedData[i].logSize;
+                uniqueIdx++;
+                prevLogSize = flattenedData[i].logSize;
             }
         }
     }
@@ -980,7 +1032,7 @@ library FriVerifier {
         }
     }
 
-    function _getUniqueLogSizesDescending(
+    function _getUniqueLogSizesAscending(
         LogSizeAndSamples[] memory flattenedData
     ) private pure returns (uint32[] memory uniqueLogSizes) {
         if (flattenedData.length == 0) {
@@ -1003,6 +1055,21 @@ library FriVerifier {
             if (flattenedData[i].logSize != flattenedData[i - 1].logSize) {
                 uniqueLogSizes[idx] = flattenedData[i].logSize;
                 idx++;
+            }
+        }
+    }
+
+    function _sortQueriesPerLogSizeAscending(
+        MerkleVerifier.QueriesPerLogSize[] memory queriesPerLogSize
+    ) private pure {
+        // Bubble sort by logSize in ascending order
+        for (uint256 i = 0; i < queriesPerLogSize.length; i++) {
+            for (uint256 j = 0; j < queriesPerLogSize.length - i - 1; j++) {
+                if (queriesPerLogSize[j].logSize > queriesPerLogSize[j + 1].logSize) {
+                    MerkleVerifier.QueriesPerLogSize memory temp = queriesPerLogSize[j];
+                    queriesPerLogSize[j] = queriesPerLogSize[j + 1];
+                    queriesPerLogSize[j + 1] = temp;
+                }
             }
         }
     }
@@ -1048,8 +1115,94 @@ library FriVerifier {
     function _createColumnSampleBatches(
         PointSample[][] memory samples
     ) private pure returns (ColumnSampleBatch[] memory batches) {
-        // Group samples by point to create batches
-        batches = new ColumnSampleBatch[](0);
+        // Rust: Groups column samples by sampled point using IndexMap
+        // Maintains stable ordering of points and columns
+        
+        // Count total samples
+        uint256 totalSamples = 0;
+        for (uint256 i = 0; i < samples.length; i++) {
+            totalSamples += samples[i].length;
+        }
+        
+        if (totalSamples == 0) {
+            return new ColumnSampleBatch[](0);
+        }
+        
+        // Collect all (point, column_index, value) tuples
+        CirclePoint.Point[] memory allPoints = new CirclePoint.Point[](totalSamples);
+        uint256[] memory allColumnIndices = new uint256[](totalSamples);
+        QM31Field.QM31[] memory allValues = new QM31Field.QM31[](totalSamples);
+        
+        uint256 sampleIdx = 0;
+        for (uint256 colIdx = 0; colIdx < samples.length; colIdx++) {
+            for (uint256 i = 0; i < samples[colIdx].length; i++) {
+                allPoints[sampleIdx] = samples[colIdx][i].point;
+                allColumnIndices[sampleIdx] = colIdx;
+                allValues[sampleIdx] = samples[colIdx][i].value;
+                sampleIdx++;
+            }
+        }
+        
+        // Find unique points (stable ordering - first occurrence)
+        CirclePoint.Point[] memory uniquePoints = new CirclePoint.Point[](totalSamples);
+        uint256[] memory pointFirstIndex = new uint256[](totalSamples);
+        uint256 numUniquePoints = 0;
+        
+        for (uint256 i = 0; i < totalSamples; i++) {
+            bool found = false;
+            for (uint256 j = 0; j < numUniquePoints; j++) {
+                if (_pointsEqual(allPoints[i], uniquePoints[j])) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                uniquePoints[numUniquePoints] = allPoints[i];
+                pointFirstIndex[numUniquePoints] = i;
+                numUniquePoints++;
+            }
+        }
+        
+        // Create batches - one per unique point
+        batches = new ColumnSampleBatch[](numUniquePoints);
+        
+        for (uint256 batchIdx = 0; batchIdx < numUniquePoints; batchIdx++) {
+            CirclePoint.Point memory currentPoint = uniquePoints[batchIdx];
+            
+            // Count samples for this point
+            uint256 samplesForPoint = 0;
+            for (uint256 i = 0; i < totalSamples; i++) {
+                if (_pointsEqual(allPoints[i], currentPoint)) {
+                    samplesForPoint++;
+                }
+            }
+            
+            // Collect (column_index, value) pairs for this point
+            ColumnAndValue[] memory columnsAndValues = new ColumnAndValue[](samplesForPoint);
+            uint256 colValIdx = 0;
+            for (uint256 i = 0; i < totalSamples; i++) {
+                if (_pointsEqual(allPoints[i], currentPoint)) {
+                    columnsAndValues[colValIdx] = ColumnAndValue({
+                        columnIndex: allColumnIndices[i],
+                        value: allValues[i]
+                    });
+                    colValIdx++;
+                }
+            }
+            
+            batches[batchIdx] = ColumnSampleBatch({
+                point: currentPoint,
+                columnsAndValues: columnsAndValues
+            });
+        }
+    }
+    
+    /// @notice Check if two CirclePoints are equal
+    function _pointsEqual(
+        CirclePoint.Point memory a,
+        CirclePoint.Point memory b
+    ) private pure returns (bool) {
+        return QM31Field.eq(a.x, b.x) && QM31Field.eq(a.y, b.y);
     }
 
     function _calculateQuotientConstants(
@@ -1150,24 +1303,23 @@ library FriVerifier {
         for (uint256 i = 0; i < sampleBatches.length; i++) {
             CirclePoint.Point memory samplePoint = sampleBatches[i].point;
 
-            // Extract real and imaginary parts
-            uint32 prx = samplePoint.x.first.real;
-            uint32 pry = samplePoint.y.first.real;
-            uint32 pix = samplePoint.x.first.imag;
-            uint32 piy = samplePoint.y.first.imag;
-
+            CM31Field.CM31 memory prx = samplePoint.x.first;
+            CM31Field.CM31 memory pry = samplePoint.y.first;
+            CM31Field.CM31 memory pix = samplePoint.x.second;
+            CM31Field.CM31 memory piy = samplePoint.y.second;
             // Calculate: (prx - domain_point.x) * piy - (pry - domain_point.y) * pix
-            uint32 dx = prx >= domainPoint.x
-                ? prx - domainPoint.x
-                : domainPoint.x - prx;
-            uint32 dy = pry >= domainPoint.y
-                ? pry - domainPoint.y
-                : domainPoint.y - pry;
-
-            denominators[i] = CM31Field.fromM31(dx * piy, dy * pix);
+            CM31Field.CM31 memory term1 = CM31Field.mul(
+                CM31Field.sub(prx, CM31Field.fromM31(domainPoint.x, 0)),
+                piy
+            );
+            CM31Field.CM31 memory term2 = CM31Field.mul(
+                CM31Field.sub(pry, CM31Field.fromM31(domainPoint.y, 0)),
+                pix
+            );
+            denominators[i] = CM31Field.sub(term1, term2);
         }
 
-        // Batch inverse (simplified - would need proper implementation)
+        // Batch inverse
         inverses = CM31Field.batchInverse(denominators);
     }
 
@@ -1176,10 +1328,35 @@ library FriVerifier {
         QM31Field.QM31 memory alpha
     ) private pure returns (QM31Field.QM31[] memory coeffs) {
         coeffs = new QM31Field.QM31[](3);
-        // Simplified implementation - would need proper complex conjugate line calculation
-        coeffs[0] = QM31Field.mul(alpha, sample.point.x); // a
-        coeffs[1] = QM31Field.mul(alpha, sample.point.y); // b
-        coeffs[2] = alpha; // c
+        QM31Field.QM31 memory valueConj = _conjugateQM31(sample.value);
+        QM31Field.QM31 memory a = QM31Field.sub(valueConj, sample.value);
+    
+        // Calculate c = point.conjugate().y - point.y
+        CirclePoint.Point memory pointConj = CirclePoint.conjugate(sample.point);
+        
+        QM31Field.QM31 memory c = QM31Field.sub(pointConj.y, sample.point.y);
+        
+        // Calculate b = value * c - a * point.y
+        QM31Field.QM31 memory valueMulC = QM31Field.mul(sample.value, c);
+        QM31Field.QM31 memory aMulY = QM31Field.mul(a, sample.point.y);
+        QM31Field.QM31 memory b = QM31Field.sub(valueMulC, aMulY);
+
+
+        // Return (alpha * a, alpha * b, alpha * c)
+        coeffs[0] = QM31Field.mul(alpha, a);
+        coeffs[1] = QM31Field.mul(alpha, b);
+        coeffs[2] = QM31Field.mul(alpha, c);
+    }
+    
+    /// @notice Complex conjugate for QM31 (negates second component)
+    /// @dev Equivalent to Rust ComplexConjugate trait for QM31
+    /// @param a QM31 element to conjugate
+    /// @return Conjugated element (first, -second)
+    function _conjugateQM31(QM31Field.QM31 memory a) private pure returns (QM31Field.QM31 memory) {
+        return QM31Field.QM31({
+            first: a.first,
+            second: CM31Field.neg(a.second)
+        });
     }
 
     function _bitReverseIndex(
@@ -1235,7 +1412,7 @@ library FriVerifier {
             bool firstLayerSuccess,
             SparseEvaluation[] memory firstLayerSparseEvals
         ) = decommitFirstLayer(friVerifierState, queries, firstLayerQueryEvals);
-
+        console.log("First layer decommitment success:", firstLayerSuccess);
         if (!firstLayerSuccess) {
             revert(
                 "FRI decommit failed at STEP 1: First layer verification failed"
@@ -1258,7 +1435,7 @@ library FriVerifier {
                 innerLayerQueries,
                 firstLayerSparseEvals
             );
-
+        console.log("Inner layers decommitment success:", innerLayersSuccess);
         if (!innerLayersSuccess) {
             revert("FRI decommit failed at STEP 3: Inner layers verification failed");
         }
@@ -1266,6 +1443,7 @@ library FriVerifier {
 
         // Step 4: Verify last layer
         bool lastLayerSuccess = decommitLastLayer(friVerifierState, lastLayerQueries, lastLayerQueryEvals);
+        console.log("Last layer decommitment success:", lastLayerSuccess);
         if (!lastLayerSuccess) {
             revert("FRI decommit failed at STEP 4: Last layer verification failed");
         }
@@ -1495,24 +1673,41 @@ library FriVerifier {
             });
         }
 
-        // Debug: Print queriesPerLogSize
-        console.log("\n=== DEBUG: queriesPerLogSize ===");
-        console.log("numUniqueLogSizes:", numUniqueLogSizes);
-        for (uint256 i = 0; i < queriesPerLogSize.length; i++) {
-            console.log("  [%d] logSize:", i, queriesPerLogSize[i].logSize);
-            console.log(
-                "      queries.length:",
-                queriesPerLogSize[i].queries.length
-            );
-            for (uint256 j = 0; j < queriesPerLogSize[i].queries.length; j++) {
-                console.log(
-                    "        query[%d]:",
-                    j,
-                    queriesPerLogSize[i].queries[j]
-                );
-            }
-        }
-        console.log("=== END queriesPerLogSize ===\n");
+        // Sort queriesPerLogSize by logSize in ascending order to match Rust behavior
+        _sortQueriesPerLogSizeAscending(queriesPerLogSize);
+
+        // // Debug: Print queriesPerLogSize
+        // console.log("\n=== DEBUG: queriesPerLogSize ===");
+        // console.log("numUniqueLogSizes:", numUniqueLogSizes);
+        // for (uint256 i = 0; i < queriesPerLogSize.length; i++) {
+        //     console.log("  [%d] logSize:", i, queriesPerLogSize[i].logSize);
+        //     console.log(
+        //         "      queries.length:",
+        //         queriesPerLogSize[i].queries.length
+        //     );
+        //     for (uint256 j = 0; j < queriesPerLogSize[i].queries.length; j++) {
+        //         console.log(
+        //             "        query[%d]:",
+        //             j,
+        //             queriesPerLogSize[i].queries[j]
+        //         );
+        //     }
+        // }
+        // console.log("=== END queriesPerLogSize ===\n");
+        
+        // // Debug: Print decommittedValues
+        // console.log("=== DEBUG: decommittedValues ===");
+        // console.log("decommittedValues.length:", decommittedValues.length);
+        // uint256 printLimit = 48;
+        // for (uint256 i = 0; i < printLimit; i++) {
+        //     console.log("  [%d]:", i, decommittedValues[i]);
+        // }
+        // if (decommittedValues.length > printLimit) {
+        //     console.log("  ... (%d more values)", decommittedValues.length - printLimit);
+        // }
+        // console.log("=== END decommittedValues ===\n");
+
+        console.log("Verfiingh first layer merkle proof");
         // Verify Merkle proof
         MerkleVerifier.verify(
             verifier,

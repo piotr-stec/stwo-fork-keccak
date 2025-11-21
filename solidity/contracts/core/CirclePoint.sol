@@ -79,8 +79,8 @@ library CirclePoint {
     /// @return The conjugated point
     function conjugate(Point memory point) internal pure returns (Point memory) {
         return Point({
-            x: point.x,
-            y: QM31Field.neg(point.y)
+            x: _conjugateQM31(point.x),
+            y: _conjugateQM31(point.y)
         });
     }
 
@@ -103,6 +103,18 @@ library CirclePoint {
         
         return result;
     }
+
+    /// @notice Complex conjugate for QM31 (negates second component)
+    /// @dev Equivalent to Rust ComplexConjugate trait for QM31
+    /// @param a QM31 element to conjugate
+    /// @return Conjugated element (first, -second)
+    function _conjugateQM31(QM31Field.QM31 memory a) private pure returns (QM31Field.QM31 memory) {
+        return QM31Field.QM31({
+            first: a.first,
+            second: CM31Field.neg(a.second)
+        });
+    }
+
 
 
     /// @notice Generates a random point on the circle using channel state directly

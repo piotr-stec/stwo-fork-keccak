@@ -61,7 +61,6 @@ contract STWOVerifier {
     /// @dev Passed during verify() call, not stored in contract
     struct VerificationParams {
         address evaluator; // Address of IFrameworkEval implementation
-        uint32 nColumns; // Number of trace columns
         QM31Field.QM31 claimedSum; // Claimed sum for logup constraints
         FrameworkComponentLib.ComponentInfo componentInfo; // Precomputed component info
     }
@@ -550,11 +549,14 @@ contract STWOVerifier {
         // Verify merkle decommitments (equivalent to Rust tree verification loop)
         // self.trees.as_ref().zip_eq(proof.decommitments).zip_eq(proof.queried_values.clone())
         //     .map(|((tree, decommitment), queried_values)| tree.verify(...))
+        console.log("Verifying Merkle decommitments...");
         bool merkleVerificationSuccess = _verifyMerkleDecommitments(
             decommitments,
             queriedValues,
             queryPositions
         );
+
+        console.log("Merkle decommitments verified.", merkleVerificationSuccess);
 
         if (!merkleVerificationSuccess) {
             return false;

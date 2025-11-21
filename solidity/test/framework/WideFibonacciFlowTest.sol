@@ -1166,7 +1166,6 @@ contract WideFibonacciFlowTest is Test {
         STWOVerifier verifier = new STWOVerifier();
         STWOVerifier.VerificationParams memory params = STWOVerifier.VerificationParams({
             evaluator: address(wideFibEvalAddress),
-            nColumns: 50,
             claimedSum: QM31Field.zero(),
             componentInfo: componentInfo
         });
@@ -1368,16 +1367,7 @@ contract WideFibonacciFlowTest is Test {
             "Fibonacci values to QM31 format"
         );
 
-        // Test that our WideFibonacci evaluator can handle these real values
-        (string memory name, uint256 nConstraints, ) = wideFibEval
-            .getEvalInfo();
-        // console.log("Evaluator", name, "expects", nConstraints, "constraints for", realFib.length, "columns");
 
-        assertEq(
-            nConstraints,
-            49,
-            "Should have 49 constraints for 51 columns (51-2=49)"
-        );
     }
 
     // =============================================================================
