@@ -549,14 +549,12 @@ contract STWOVerifier {
         // Verify merkle decommitments (equivalent to Rust tree verification loop)
         // self.trees.as_ref().zip_eq(proof.decommitments).zip_eq(proof.queried_values.clone())
         //     .map(|((tree, decommitment), queried_values)| tree.verify(...))
-        console.log("Verifying Merkle decommitments...");
         bool merkleVerificationSuccess = _verifyMerkleDecommitments(
             decommitments,
             queriedValues,
             queryPositions
         );
 
-        console.log("Merkle decommitments verified.", merkleVerificationSuccess);
 
         if (!merkleVerificationSuccess) {
             return false;
