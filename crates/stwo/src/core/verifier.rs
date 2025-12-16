@@ -4,7 +4,7 @@ use thiserror::Error;
 use crate::core::air::{Component, Components};
 use crate::core::channel::{Channel, MerkleChannel};
 use crate::core::circle::CirclePoint;
-use crate::core::fields::qm31::{SecureField, SECURE_EXTENSION_DEGREE};
+use crate::core::fields::qm31::{SECURE_EXTENSION_DEGREE, SecureField};
 use crate::core::fri::FriVerificationError;
 use crate::core::pcs::CommitmentSchemeVerifier;
 use crate::core::proof::StarkProof;
@@ -21,10 +21,11 @@ pub fn verify<MC: MerkleChannel>(
         .column_log_sizes
         .len();
 
-    let components = Components {
+    let components: Components<'_> = Components {
         components: components.to_vec(),
         n_preprocessed_columns,
     };
+    println!("Composition log degree bound: {}", components.composition_log_degree_bound());
     tracing::info!(
         "Composition polynomial log degree bound: {}",
         components.composition_log_degree_bound()
@@ -37,9 +38,10 @@ pub fn verify<MC: MerkleChannel>(
         &[components.composition_log_degree_bound(); SECURE_EXTENSION_DEGREE],
         channel,
     );
-
+    
     // Draw OODS point.
     let oods_point = CirclePoint::<SecureField>::get_random_point(channel);
+    println!("OODS point: {:?}", oods_point);
 
     // Get mask sample points relative to oods point.
     let mut sample_points = components.mask_points(oods_point);
@@ -60,6 +62,8 @@ pub fn verify<MC: MerkleChannel>(
                 std_shims::ToString::to_string(&"Unexpected sampled_values structure"),
             ))?;
 
+    println!("Composition OODS evaluation: {:?}", composition_oods_eval);
+    // for loop components composition w tylu elementach jaki stopień
     if composition_oods_eval
         != components.eval_composition_polynomial_at_point(
             oods_point,
@@ -69,7 +73,7 @@ pub fn verify<MC: MerkleChannel>(
     {
         return Err(VerificationError::OodsNotMatching);
     }
-
+    println!("Sample points len: {:?}", sample_points[1].len());
     commitment_scheme.verify_values(sample_points, proof.0, channel)
 }
 

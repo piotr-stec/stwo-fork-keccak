@@ -33,7 +33,12 @@ impl Components<'_> {
                 .iter()
                 .map(|component| component.mask_points(point)),
         );
+        println!("Mask points before preprocessed adjustment: {:?}", mask_points);
+        for col in 0..mask_points.len(){
+            println!("Mask point length for column {}: {:?}", col, mask_points[col].len());
 
+        }
+        println!("Number of preprocessed columns: {}", self.n_preprocessed_columns);
         let preprocessed_mask_points = &mut mask_points[PREPROCESSED_TRACE_IDX];
         *preprocessed_mask_points = vec![vec![]; self.n_preprocessed_columns];
 
@@ -43,8 +48,13 @@ impl Components<'_> {
             }
         }
 
+       for col in 0..mask_points.len(){
+            println!("Mask point length for column after preprocess {}: {:?}", col, mask_points[col].len());
+
+        }
         mask_points
     }
+
 
     pub fn eval_composition_polynomial_at_point(
         &self,
@@ -52,7 +62,7 @@ impl Components<'_> {
         mask_values: &TreeVec<Vec<Vec<SecureField>>>,
         random_coeff: SecureField,
     ) -> SecureField {
-        let mut evaluation_accumulator = PointEvaluationAccumulator::new(random_coeff);
+        let mut evaluation_accumulator: PointEvaluationAccumulator = PointEvaluationAccumulator::new(random_coeff);
         for component in &self.components {
             component.evaluate_constraint_quotients_at_point(
                 point,

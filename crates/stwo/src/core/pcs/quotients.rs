@@ -36,6 +36,7 @@ pub struct CommitmentSchemeProof<H: MerkleHasher> {
 }
 
 /// A batch of column samplings at a point.
+#[derive(Clone, Debug)]
 pub struct ColumnSampleBatch {
     /// The point at which the columns are sampled.
     pub point: CirclePoint<SecureField>,
@@ -68,6 +69,7 @@ impl ColumnSampleBatch {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct PointSample {
     pub point: CirclePoint<SecureField>,
     pub value: SecureField,
@@ -82,7 +84,15 @@ pub fn fri_answers(
     n_columns_per_log_size: TreeVec<&BTreeMap<u32, usize>>,
 ) -> Result<ColumnVec<Vec<SecureField>>, VerificationError> {
     let mut queried_values = queried_values.map(|values| values.into_iter());
-
+    println!(
+        "fri_answers: queried_values.len() = {}",
+        queried_values.len()
+    );
+    println!(
+        "column_log_sizes: len = {:?}",
+        column_log_sizes.clone().flatten()
+    );
+ 
     izip!(column_log_sizes.flatten(), samples.flatten().iter())
         .sorted_by_key(|(log_size, ..)| Reverse(*log_size))
         .group_by(|(log_size, ..)| *log_size)
@@ -112,10 +122,18 @@ pub fn fri_answers_for_log_size(
     n_columns: TreeVec<usize>,
 ) -> Result<Vec<SecureField>, VerificationError> {
     let sample_batches = ColumnSampleBatch::new_vec(samples);
+    println!(
+        "Sample batches for log size {}: {:?}",
+        log_size, sample_batches
+    );
     // TODO(ilya): Is it ok to use the same `random_coeff` for all log sizes.
     let quotient_constants = quotient_constants(&sample_batches, random_coeff);
+    // println!("Quotient constants after compute: {:?}", quotient_constants);
     let commitment_domain = CanonicCoset::new(log_size).circle_domain();
-
+    // println!(
+    //     "Commitment domain for log size {}: {:?}",
+    //     log_size, commitment_domain
+    // );
     let mut quotient_evals_at_queries = Vec::new();
     for &query_position in query_positions {
         let domain_point = commitment_domain.at(bit_reverse_index(query_position, log_size));
@@ -126,14 +144,36 @@ pub fn fri_answers_for_log_size(
             .map(|(queried_values, n_columns)| queried_values.take(*n_columns).collect())
             .flatten();
 
-        quotient_evals_at_queries.push(accumulate_row_quotients(
+        // println!(
+        //     "Sample batches at query position {}: {:?}",
+        //     query_position, sample_batches
+        // );
+        println!(
+            "Queried values at row {}: {:?}, log size: {}",
+            query_position, queried_values_at_row, log_size
+        );
+        // println!("Quotient constants: {:?}", quotient_constants);
+        // println!(
+        //     "Domain point at query position {}: {:?}, log size: {}",
+        //     query_position, domain_point, log_size
+        // );
+        let sf = accumulate_row_quotients(
             &sample_batches,
             &queried_values_at_row,
             &quotient_constants,
             domain_point,
-        ));
-    }
+        );
 
+        // println!(
+        //     "Accumulate row quotients at query position {}: {}",
+        //     query_position, sf
+        // );
+        quotient_evals_at_queries.push(sf);
+    }
+    println!(
+        "Quotient evals at queries for log size {}: {:?}",
+        log_size, quotient_evals_at_queries
+    );
     Ok(quotient_evals_at_queries)
 }
 
@@ -143,6 +183,7 @@ pub fn accumulate_row_quotients(
     quotient_constants: &QuotientConstants,
     domain_point: CirclePoint<BaseField>,
 ) -> SecureField {
+
     let denominator_inverses = denominator_inverses(sample_batches, domain_point);
     let mut row_accumulator = SecureField::zero();
     for (sample_batch, line_coeffs, denominator_inverse) in izip!(
@@ -154,6 +195,9 @@ pub fn accumulate_row_quotients(
         for ((column_index, _), (a, b, c)) in zip_eq(&sample_batch.columns_and_values, line_coeffs)
         {
             let value = queried_values_at_row[*column_index] * *c;
+            println!("Value at column {}: {:?} for denomiator inverse: {:?}", column_index, value, denominator_inverse);
+            println!("Queried values at row {:?}", queried_values_at_row[*column_index]);
+            println!("Line coeffs c: {:?}", c);
             // The numerator is a line equation passing through
             //   (sample_point.y, sample_value), (conj(sample_point), conj(sample_value))
             // evaluated at (domain_point.y, value).
@@ -161,10 +205,12 @@ pub fn accumulate_row_quotients(
             // at sample_point and conj(sample_point) if the original polynomial had the values
             // sample_value and conj(sample_value) at these points.
             let linear_term = *a * domain_point.y + *b;
+            println!("numerator: {:?}", value - linear_term);
             numerator += value - linear_term;
         }
 
         row_accumulator += numerator.mul_cm31(denominator_inverse);
+        println!("Row accumulator after batch: {:?}", row_accumulator);
     }
     row_accumulator
 }
@@ -230,6 +276,7 @@ pub fn quotient_constants(
 }
 
 /// Holds the precomputed constant values used in each quotient evaluation.
+#[derive(Clone, Debug)]
 pub struct QuotientConstants {
     /// The line coefficients for each quotient numerator term. For more details see
     /// [self::column_line_coeffs].

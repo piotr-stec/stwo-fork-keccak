@@ -6,6 +6,7 @@ use super::fields::qm31::SecureField;
 use super::fields::ExtensionOf;
 use super::pcs::quotients::PointSample;
 use crate::core::fields::ComplexConjugate;
+use crate::core::fields::qm31::QM31;
 
 /// Evaluates a vanishing polynomial of the coset at a point.
 pub fn coset_vanishing<F: ExtensionOf<BaseField>>(coset: Coset, mut p: CirclePoint<F>) -> F {
@@ -23,13 +24,31 @@ pub fn coset_vanishing<F: ExtensionOf<BaseField>>(coset: Coset, mut p: CirclePoi
     // .   .
     //   X
     // ```
+    println!("Point for coset vanishing: {:?}", p);
+    println!("coset.initial: {:?}", coset.initial);
+    println!("coset.step_size: {:?}", coset.step_size);
+        println!("coset.step_size.half(): {:?}", coset.step_size.half());
+
+    println!("coset.step_size.half().to_point(): {:?}", coset.step_size.half().to_point());
+    println!("p - !!!smth: {:?}", p - coset.initial.into_ef() + coset.step_size.half().to_point().into_ef() );
+
+    let point_a: CirclePoint<QM31> = coset.initial.into_ef();
+    let point_b: CirclePoint<QM31> = coset.step_size.half().to_point().into_ef();
+        println!("Point A congjuate: {:?}", point_a.conjugate());
+
+    println!("Point A for coset vanishing: {:?}", point_a);
+    println!("Point B for coset vanishing: {:?}", point_b);
+    println!("Result of sub a - b: {:?}", point_a - point_b);
+
     p = p - coset.initial.into_ef() + coset.step_size.half().to_point().into_ef();
+    println!("Rotated point for coset vanishing: {:?}", p);
     let mut x = p.x;
 
     // The formula for the x coordinate of the double of a point.
     for _ in 1..coset.log_size {
         x = CirclePoint::double_x(x);
     }
+    println!("Coset vanishing at point {:?} is {:?}", p, x);
     x
 }
 
@@ -106,6 +125,7 @@ pub fn complex_conjugate_line_coeffs(
         "Cannot evaluate a line with a single point ({:?}).",
         sample.point
     );
+
     let a = sample.value.complex_conjugate() - sample.value;
     let c = sample.point.complex_conjugate().y - sample.point.y;
     let b = sample.value * c - a * sample.point.y;

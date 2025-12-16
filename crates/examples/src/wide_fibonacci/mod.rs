@@ -143,13 +143,35 @@ mod tests {
         let traces = TreeVec::new(vec![vec![], generate_test_trace(LOG_N_INSTANCES)]);
         let trace_polys =
             traces.map(|trace| trace.into_iter().map(|c| c.interpolate()).collect_vec());
-
+        println!("Generated trace polys");
+        println!(
+            "Trace polys len: {}",
+            trace_polys.as_ref()[1].len()
+        );
         assert_constraints_on_polys(
             &trace_polys,
             CanonicCoset::new(LOG_N_INSTANCES),
             fibonacci_constraint_evaluator::<LOG_N_INSTANCES>,
             SecureField::zero(),
         );
+    }
+
+    #[test]
+    fn test_export_polys() {
+        const LOG_N_INSTANCES: u32 = 6;
+        let trace = generate_test_trace(LOG_N_INSTANCES);
+        
+        println!("Number of trace columns: {}", trace.len());
+        
+        for (i, evaluation) in trace.into_iter().enumerate() {
+            let poly = evaluation.interpolate();
+            println!("Column {} coefficients:", i);
+            for (j, coeff) in poly.coeffs.data.iter().take(10).enumerate() {
+                println!("  coeff[{}] = {:?}", j, coeff);
+            }
+            println!("  ... (showing first 10 coefficients)");
+            println!("  Total coefficients: {}", poly.coeffs.len());
+        }
     }
 
     #[test]

@@ -11,6 +11,7 @@ use crate::prover::poly::twiddles::TwiddleTree;
 use crate::prover::poly::BitReversedOrder;
 use crate::prover::secure_column::SecureColumnByCoords;
 
+#[derive(Clone, Debug)]
 pub struct SecureCirclePoly<B: ColumnOps<BaseField>>(pub [CirclePoly<B>; SECURE_EXTENSION_DEGREE]);
 
 impl<B: PolyOps> SecureCirclePoly<B> {
@@ -126,5 +127,150 @@ impl<EvalOrder> From<CircleEvaluation<CpuBackend, SecureField, EvalOrder>>
 {
     fn from(evaluation: CircleEvaluation<CpuBackend, SecureField, EvalOrder>) -> Self {
         Self::new(evaluation.domain, evaluation.values.into_iter().collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::circle::CirclePoint;
+    use crate::core::fields::m31::BaseField;
+    use crate::core::fields::qm31::SecureField;
+    use crate::prover::backend::cpu::CpuBackend;
+    use crate::prover::poly::circle::CirclePoly;
+
+    #[test]
+    fn test_secure_circle_poly_eval_at_point() {
+        // Create simple circle polynomials for each coordinate
+        // First coordinate: 1 + 2y + 3x + 4xy (coefficients in bit-reversed order: [1, 3, 2, 4])
+        let coeffs0: Vec<BaseField> = vec![1, 3, 2, 4].iter().map(|&x| BaseField::from(x)).collect();
+        let poly0 = CirclePoly::<CpuBackend>::new(coeffs0);
+
+        // Second coordinate: 5 + 6y (coefficients: [5, 6])
+        // let coeffs1: Vec<BaseField> = vec![5, 6].iter().map(|&x| BaseField::from(x)).collect();
+        let mut poly1_extended = vec![BaseField::from(5), BaseField::from(6)];
+        poly1_extended.resize(4, BaseField::from(0));
+        let poly1 = CirclePoly::<CpuBackend>::new(poly1_extended);
+
+        // Third coordinate: 7 (constant, extended to size 4)
+        let mut coeffs2 = vec![BaseField::from(7)];
+        coeffs2.resize(4, BaseField::from(0));
+        let poly2 = CirclePoly::<CpuBackend>::new(coeffs2);
+
+        // Fourth coordinate: 8 + 9y (coefficients: [8, 9], extended to size 4)
+        let mut coeffs3 = vec![BaseField::from(8), BaseField::from(9)];
+        coeffs3.resize(4, BaseField::from(0));
+        let poly3 = CirclePoly::<CpuBackend>::new(coeffs3);
+
+        // Create SecureCirclePoly
+        let secure_poly = SecureCirclePoly([poly0, poly1, poly2, poly3]);
+
+        // Test point (x=5, y=8) - same as Solidity test
+        let point = CirclePoint{ x: SecureField::from(5), y: SecureField::from(8) };
+
+        // Evaluate using eval_at_point
+        let result = secure_poly.eval_at_point(point);
+
+        // Manually compute expected result
+        let eval0 = secure_poly[0].eval_at_point(point); // 1 + 2*8 + 3*5 + 4*5*8 = 192
+        let eval1 = secure_poly[1].eval_at_point(point); // 5 + 6*8 = 53
+        let eval2 = secure_poly[2].eval_at_point(point); // 7
+        let eval3 = secure_poly[3].eval_at_point(point); // 8 + 9*8 = 80
+
+        println!("Individual evaluations:");
+        println!("eval0: {:?}", eval0);
+        println!("eval1: {:?}", eval1);
+        println!("eval2: {:?}", eval2);
+        println!("eval3: {:?}", eval3);
+
+        // Create expected result using from_partial_evals
+        let expected = SecureField::from_partial_evals([eval0, eval1, eval2, eval3]);
+
+        println!("Expected result: {:?}", expected);
+        println!("Actual result: {:?}", result);
+
+        assert_eq!(result, expected, "SecureCirclePoly eval_at_point should match manual calculation");
+    }
+
+    #[test]
+    fn test_secure_circle_poly_single_coord() {
+        // Test with only first coordinate non-zero
+        let coeffs0: Vec<BaseField> = vec![1, 2, 3, 4].iter().map(|&x| BaseField::from(x)).collect();
+        let poly0 = CirclePoly::<CpuBackend>::new(coeffs0);
+
+        // Other coordinates are constant zero
+        let poly1 = CirclePoly::<CpuBackend>::new(vec![17,22,2323,1212].iter().map(|&x| BaseField::from(x)).collect());
+        let poly2 = CirclePoly::<CpuBackend>::new(vec![2323,22,1212, 1212].iter().map(|&x| BaseField::from(x)).collect());
+        let poly3 = CirclePoly::<CpuBackend>::new(vec![17,22,2323,1212].iter().map(|&x| BaseField::from(x)).collect());
+
+        let secure_poly = SecureCirclePoly([poly0, poly1, poly2, poly3]);
+        println!("SecureCirclePoly with single non-zero coordinate: {:?}", secure_poly);
+        // Test point
+        let point = CirclePoint{ x: SecureField::from(5), y: SecureField::from(8) };
+        let result = secure_poly.eval_at_point(point);
+
+        println!("Result of evaluation: {:?}", result);
+
+    
+    }
+
+    #[test]
+    fn test_secure_circle_poly_constant() {
+        // Test with all coordinates having constant polynomials
+        let mut extended_coeffs = vec![BaseField::from(42)];
+        extended_coeffs.resize(4, BaseField::from(0)); // Extend to power of 2
+
+        let poly0 = CirclePoly::<CpuBackend>::new(extended_coeffs.clone());
+        let poly1 = CirclePoly::<CpuBackend>::new(extended_coeffs.clone());
+        let poly2 = CirclePoly::<CpuBackend>::new(extended_coeffs.clone());
+        let poly3 = CirclePoly::<CpuBackend>::new(extended_coeffs);
+
+        let secure_poly = SecureCirclePoly([poly0, poly1, poly2, poly3]);
+
+        // Test point - result should be same regardless of point for constant polynomial
+        let point = CirclePoint{ x: SecureField::from(100), y: SecureField::from(200) };
+        let result = secure_poly.eval_at_point(point);
+
+        let expected = SecureField::from_partial_evals([
+            SecureField::from(42),
+            SecureField::from(42),
+            SecureField::from(42),
+            SecureField::from(42)
+        ]);
+
+        assert_eq!(result, expected, "Constant polynomial evaluation should be independent of point");
+    }
+
+    #[test]
+    fn test_secure_circle_poly_identity_point() {
+        // Test evaluation at identity point (1, 0)
+        let coeffs0: Vec<BaseField> = vec![10, 20, 30, 40].iter().map(|&x| BaseField::from(x)).collect();
+        let poly0 = CirclePoly::<CpuBackend>::new(coeffs0);
+
+        let zero_coeffs = vec![BaseField::from(0); 4];
+        let poly1 = CirclePoly::<CpuBackend>::new(zero_coeffs.clone());
+        let poly2 = CirclePoly::<CpuBackend>::new(zero_coeffs.clone());
+        let poly3 = CirclePoly::<CpuBackend>::new(zero_coeffs);
+
+        let secure_poly = SecureCirclePoly([poly0, poly1, poly2, poly3]);
+
+        // Identity point (1, 0)
+        let point = CirclePoint{ x: SecureField::from(1), y: SecureField::from(0) };
+        let result = secure_poly.eval_at_point(point);
+
+        // For polynomial 10 + 20x + 30y + 40xy at (1, 0):
+        // result = 10 + 20*1 + 30*0 + 40*1*0 = 30
+        let expected_eval = BaseField::from(10) + BaseField::from(20) * BaseField::from(1);
+        let expected = SecureField::from_partial_evals([
+            SecureField::from(expected_eval),
+            SecureField::from(0),
+            SecureField::from(0),
+            SecureField::from(0)
+        ]);
+
+        println!("Expected eval at identity: {:?}", expected_eval);
+        println!("Result at identity: {:?}", result);
+
+        assert_eq!(result, expected, "Evaluation at identity point should match expected");
     }
 }

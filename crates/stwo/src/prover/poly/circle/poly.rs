@@ -17,7 +17,7 @@ pub struct CirclePoly<B: ColumnOps<BaseField>> {
     /// pi(x) := 2x^2 - 1.
     pub coeffs: Col<B, BaseField>,
     /// The number of coefficients stored as `log2(len(coeffs))`.
-    log_size: u32,
+    pub log_size: u32,
 }
 
 impl<B: PolyOps> CirclePoly<B> {

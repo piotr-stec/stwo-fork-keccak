@@ -75,6 +75,17 @@ impl<H: MerkleHasher> MerkleVerifier<H> {
         queried_values: Vec<BaseField>,
         decommitment: MerkleDecommitment<H>,
     ) -> Result<(), MerkleVerificationError> {
+        println!("Starting Merkle verification...");
+        println!(
+            "Queries per log size: {:?}",
+            queries_per_log_size
+        );
+        println!(
+            "queried values: {:?}",
+            queried_values
+        );
+
+        
         let Some(max_log_size) = self.column_log_sizes.iter().max() else {
             return Ok(());
         };
