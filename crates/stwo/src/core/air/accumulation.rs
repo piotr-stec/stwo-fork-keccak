@@ -27,10 +27,7 @@ impl PointEvaluationAccumulator {
 
     /// Accumulates u_i(P0), a polynomial evaluation at a P0 in reverse order.
     pub fn accumulate(&mut self, evaluation: SecureField) {
-        println!(
-            "Accumulating evaluation: {}, current accumulation: {}",
-            evaluation, self.accumulation
-        );
+
         self.accumulation = self.accumulation * self.random_coeff + evaluation;
     }
 

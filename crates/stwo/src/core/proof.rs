@@ -23,7 +23,6 @@ impl<H: MerkleHasher> StarkProof<H> {
         let [.., composition_mask] = &**self.sampled_values else {
             return None;
         };
-        println!("Composition mask: {:?}", composition_mask);
         let coordinate_evals = composition_mask
             .iter()
             .map(|columns| {

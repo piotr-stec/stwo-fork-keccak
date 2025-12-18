@@ -109,14 +109,9 @@ pub fn prove_with_composition_polynomial<B: BackendForChannel<MC>, MC: MerkleCha
         class = "CompositionPolynomialGeneration"
     )
     .entered();
-    println!("Random coeff for composition polynomial: {:?}", random_coeff);
     let composition_poly = component_provers.compute_composition_polynomial(random_coeff, &trace);
     // for coeff_data in composition_poly
-    println!("Computed composition polynomial.");
-    println!(
-        "Composition polynomial: {:?}",
-        composition_poly
-    );
+
     span1.exit();
 
     let mut tree_builder = commitment_scheme.tree_builder();

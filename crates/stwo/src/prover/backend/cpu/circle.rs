@@ -78,13 +78,11 @@ impl PolyOps for CpuBackend {
 
         let mut mappings = vec![point.y];
         let mut x = point.x;
-        println!("Poly log size: {}", poly.log_size());
         for _ in 1..poly.log_size() {
             mappings.push(x);
             x = CirclePoint::double_x(x);
         }
         mappings.reverse();
-        println!("Mappings: {:?}", mappings);
 
         fold(&poly.coeffs, &mappings)
     }
@@ -133,8 +131,6 @@ impl PolyOps for CpuBackend {
         for (h, t) in circle_twiddles.enumerate() {
             fft_layer_loop(&mut values, 0, h, t, butterfly);
         }
-        println!("Values after FFT: {:?}", values);
-        println!("Domain: {:?}", domain);
         CircleEvaluation::new(domain, values)
     }
 

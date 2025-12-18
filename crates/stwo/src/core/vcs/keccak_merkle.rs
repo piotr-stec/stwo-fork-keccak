@@ -31,7 +31,6 @@ impl MerkleHasher for KeccakMerkleHasher {
 
         // Use same prefix structure as Blake2s for compatibility
         if let Some((left_child, right_child)) = children_hashes {
-            // println!("Node hashing with left: 0x{} right: 0x{}", hex::encode(left_child.0), hex::encode(right_child.0));
             hasher.update(NODE_PREFIX);
             hasher.update(left_child.as_ref());
             hasher.update(right_child.as_ref());
@@ -40,7 +39,6 @@ impl MerkleHasher for KeccakMerkleHasher {
         }
 
         for value in column_values {
-            // println!("Hashing column value: {:?}", value.0.to_le_bytes());
             hasher.update(value.0.to_le_bytes());
         }
 
@@ -146,10 +144,8 @@ mod tests {
 
         // Hash as node (with dummy children)
         let dummy_child = leaf_hash;
-        println!("Dummy child hash: 0x{}", hex::encode(dummy_child.0));
         let node_hash = KeccakMerkleHasher::hash_node(Some((dummy_child, dummy_child)), &values);
 
-        println!("Node hash: 0x{}", hex::encode(node_hash.0));
         // Should produce different hashes due to different prefixes
         assert_ne!(leaf_hash, node_hash);
     }

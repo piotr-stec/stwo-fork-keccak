@@ -177,17 +177,9 @@ mod tests {
         let eval2 = secure_poly[2].eval_at_point(point); // 7
         let eval3 = secure_poly[3].eval_at_point(point); // 8 + 9*8 = 80
 
-        println!("Individual evaluations:");
-        println!("eval0: {:?}", eval0);
-        println!("eval1: {:?}", eval1);
-        println!("eval2: {:?}", eval2);
-        println!("eval3: {:?}", eval3);
 
         // Create expected result using from_partial_evals
         let expected = SecureField::from_partial_evals([eval0, eval1, eval2, eval3]);
-
-        println!("Expected result: {:?}", expected);
-        println!("Actual result: {:?}", result);
 
         assert_eq!(result, expected, "SecureCirclePoly eval_at_point should match manual calculation");
     }

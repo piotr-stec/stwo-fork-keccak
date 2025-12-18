@@ -47,7 +47,6 @@ impl EvalAtRow for PointEvaluator<'_> {
         let col_index = self.col_index[interaction];
         self.col_index[interaction] += 1;
         let mask = self.mask[interaction][col_index].clone();
-        println!("Mask for interaction {} at col index {}: {:?}", interaction, col_index, mask);
         assert_eq!(mask.len(), N);
         mask.try_into().unwrap()
     }
@@ -55,8 +54,6 @@ impl EvalAtRow for PointEvaluator<'_> {
     where
         Self::EF: Mul<G, Output = Self::EF>,
     {
-                println!("Denom inverse: {}", self.denom_inverse);
-
         self.evaluation_accumulator
             .accumulate(self.denom_inverse * constraint);
     }

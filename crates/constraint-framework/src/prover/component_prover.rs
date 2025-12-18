@@ -107,7 +107,6 @@ impl<E: FrameworkEval + Sync> ComponentProver<SimdBackend> for FrameworkComponen
                     self.eval.log_size(),
                     self.claimed_sum,
                 );
-                println!("Evaluate in contraint quotients at row {}", row);
                 let row_res = self.eval.evaluate(eval).row_res;
 
                 // Finalize row.

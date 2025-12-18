@@ -50,9 +50,7 @@ impl<MC: MerkleChannel> CommitmentSchemeVerifier<MC> {
             .iter()
             .map(|&log_size| log_size + self.config.fri_config.log_blowup_factor)
             .collect();
-        println!("Creating MerkleVerifier with commitment and extended log sizes:");
-        println!("Commitment received: {:?}", commitment);
-        println!("Extended log sizes: {:?}", extended_log_sizes);
+
         let verifier = MerkleVerifier::new(commitment, extended_log_sizes);
         self.trees.push(verifier);
     }
@@ -77,30 +75,20 @@ impl<MC: MerkleChannel> CommitmentSchemeVerifier<MC> {
                 CirclePolyDegreeBound::new(log_size - self.config.fri_config.log_blowup_factor)
             })
             .collect_vec();
-        println!("Channel state before commit Fri: {:?}", channel);
 
-        println!("Creating FRI verifier and committing...");
-        println!("FRI bounds: {:?}", bounds);
-        println!("FRI config: {:?}", self.config.fri_config);
-        println!("Proof FRI proof: {:?}", proof.fri_proof);
         // FRI commitment phase on OODS quotients.
         let mut fri_verifier =
             FriVerifier::<MC>::commit(channel, self.config.fri_config, proof.fri_proof, bounds)?;
         
-        println!("Fri first layer commitment domains after commit: {:?}", fri_verifier.first_layer.column_commitment_domains);
 
         // Verify proof of work.
-        println!("Channel state before POW verification: {:?}", channel);
         if !channel.verify_pow_nonce(self.config.pow_bits, proof.proof_of_work) {
             return Err(VerificationError::ProofOfWork);
         }
         channel.mix_u64(proof.proof_of_work);
-        println!("Channel state after POW verification: {:?}", channel);
         // Get FRI query positions.
         let query_positions_per_log_size = fri_verifier.sample_query_positions(channel);
-        println!("FRI query positions per log size: {:?}", query_positions_per_log_size);
-        println!("Self trees len: {:?}", self.trees.len());
-        println!("Verifying merkle decommitments...");
+
         // Verify merkle decommitments.
         self.trees
             .as_ref()
@@ -112,7 +100,6 @@ impl<MC: MerkleChannel> CommitmentSchemeVerifier<MC> {
             .0
             .into_iter()
             .collect::<Result<(), _>>()?;
-        println!("Merkle decommitments verified.");
         // Answer FRI queries.
         let samples = sampled_points.zip_cols(proof.sampled_values).map_cols(
             |(sampled_points, sampled_values)| {
@@ -124,14 +111,7 @@ impl<MC: MerkleChannel> CommitmentSchemeVerifier<MC> {
 
 
         let n_columns_per_log_size = self.trees.as_ref().map(|tree| &tree.n_columns_per_log_size);
-        println!("Computing FRI answers...");
-        println!("Column log sizes: {:?}", self.column_log_sizes());
-        println!("Sampled points: {:?}", samples);
-        println!("Random coeff: {:?}", random_coeff);
-        println!("Queried values: {:?}", proof.queried_values);
-        println!("Query positions per log size: {:?}", query_positions_per_log_size);
 
-        println!("N columns per log size: {:?}", n_columns_per_log_size);
         let fri_answers = fri_answers(
             self.column_log_sizes(),
             samples,
@@ -141,7 +121,6 @@ impl<MC: MerkleChannel> CommitmentSchemeVerifier<MC> {
             n_columns_per_log_size,
         )?;
 
-        println!("Fri answers computed: {:?}", fri_answers);
 
         fri_verifier.decommit(fri_answers)?;
 

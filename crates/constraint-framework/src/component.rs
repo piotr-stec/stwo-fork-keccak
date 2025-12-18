@@ -222,16 +222,13 @@ impl<E: FrameworkEval> Component for FrameworkComponent<E> {
         point: CirclePoint<SecureField>,
     ) -> TreeVec<ColumnVec<Vec<CirclePoint<SecureField>>>> {
         let trace_step = CanonicCoset::new(self.eval.log_size()).step();
-        println!("Trace step: {:?}", trace_step);
         let res =self.info.mask_offsets.as_ref().map_cols(|col_offsets| {
             col_offsets
                 .iter()
                 .map(|offset| point + trace_step.mul_signed(*offset).into_ef())
                 .collect()
         });
-        for c in 0..res.len(){
-            println!("Mask points length for column internal mask point {}: {:?}", c, res[c].len());
-        }
+
         res
     }
 
@@ -253,8 +250,6 @@ impl<E: FrameworkEval> Component for FrameworkComponent<E> {
 
         let mut mask_points = mask.sub_tree(&self.trace_locations);
         mask_points[PREPROCESSED_TRACE_IDX] = preprocessed_mask;
-        println!("Mask points: {:?}", mask_points);
-        println!("coset vanishing inversed: {:?}", coset_vanishing(CanonicCoset::new(self.eval.log_size()).coset, point).inverse());
         self.eval.evaluate(PointEvaluator::new(
             mask_points,
             evaluation_accumulator,

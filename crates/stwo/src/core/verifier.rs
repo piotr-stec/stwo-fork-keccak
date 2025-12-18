@@ -25,7 +25,6 @@ pub fn verify<MC: MerkleChannel>(
         components: components.to_vec(),
         n_preprocessed_columns,
     };
-    println!("Composition log degree bound: {}", components.composition_log_degree_bound());
     tracing::info!(
         "Composition polynomial log degree bound: {}",
         components.composition_log_degree_bound()
@@ -73,7 +72,6 @@ pub fn verify<MC: MerkleChannel>(
     {
         return Err(VerificationError::OodsNotMatching);
     }
-    println!("Sample points len: {:?}", sample_points[1].len());
     commitment_scheme.verify_values(sample_points, proof.0, channel)
 }
 

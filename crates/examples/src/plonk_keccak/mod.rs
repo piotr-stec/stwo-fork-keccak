@@ -187,7 +187,6 @@ pub fn prove_fibonacci_plonk_keccak(
     // Setup protocol with KeccakChannel - dramatic gas savings!
     let span = span!(Level::INFO, "Setup KeccakChannel").entered();
     let channel = &mut KeccakChannel::default();
-    println!("Using KeccakChannel - BYTES_PER_HASH: {} (vs Blake2s: 32)", KeccakChannel::BYTES_PER_HASH);
     let mut commitment_scheme =
         CommitmentSchemeProver::<_, KeccakMerkleChannel>::new(config, &twiddles);
     span.exit();
