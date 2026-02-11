@@ -13,12 +13,13 @@ use super::fri::FriVerificationError;
 use super::pcs::CommitmentSchemeProof;
 use super::vcs::ops::MerkleHasher;
 use crate::constraint_framework::PREPROCESSED_TRACE_IDX;
+use crate::core::ColumnVec;
 use crate::core::channel::Channel;
 use crate::core::circle::CirclePoint;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
 use crate::core::fri::{FriLayerProof, FriProof};
-use crate::core::pcs::{CommitmentSchemeProver, CommitmentSchemeVerifier};
+use crate::core::pcs::{CommitmentSchemeProver, CommitmentSchemeVerifier, TreeVec};
 use crate::core::queries::QueriesWithBranching;
 use crate::core::vcs::hash::Hash;
 use crate::core::vcs::prover::MerkleDecommitment;
@@ -98,7 +99,7 @@ pub fn verify_with_queries<MC: MerkleChannel>(
     channel: &mut MC::C,
     commitment_scheme: &mut CommitmentSchemeVerifier<MC>,
     proof: StarkProof<MC::H>,
-) -> Result<QueriesWithBranching, VerificationError> {
+) -> Result<(QueriesWithBranching, TreeVec<ColumnVec<u32>>), VerificationError> {
     let n_preprocessed_columns = commitment_scheme.trees[PREPROCESSED_TRACE_IDX]
         .column_log_sizes
         .len();
@@ -173,7 +174,7 @@ pub struct StarkProof<H: MerkleHasher>(pub CommitmentSchemeProof<H>);
 
 impl<H: MerkleHasher> StarkProof<H> {
     /// Extracts the composition trace Out-Of-Domain-Sample evaluation from the mask.
-    fn extract_composition_oods_eval(&self) -> Result<SecureField, InvalidOodsSampleStructure> {
+    pub fn extract_composition_oods_eval(&self) -> Result<SecureField, InvalidOodsSampleStructure> {
         // TODO(andrew): `[.., composition_mask, _quotients_mask]` when add quotients commitment.
         let [.., composition_mask] = &**self.sampled_values else {
             return Err(InvalidOodsSampleStructure);

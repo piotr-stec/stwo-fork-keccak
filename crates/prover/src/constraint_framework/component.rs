@@ -127,8 +127,8 @@ pub struct FrameworkComponent<C: FrameworkEval> {
     pub(super) eval: C,
     pub(super) trace_locations: TreeVec<TreeSubspan>,
     pub(super) preprocessed_column_indices: Vec<usize>,
-    info: InfoEvaluator,
-    claimed_sum: SecureField,
+    pub info: InfoEvaluator,
+    pub claimed_sum: SecureField,
 }
 
 impl<E: FrameworkEval> FrameworkComponent<E> {

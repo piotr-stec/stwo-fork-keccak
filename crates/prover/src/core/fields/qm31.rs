@@ -5,7 +5,7 @@ use std::ops::{
 
 use serde::{Deserialize, Serialize};
 
-use super::secure_column::SECURE_EXTENSION_DEGREE;
+pub use super::secure_column::SECURE_EXTENSION_DEGREE;
 use super::{ComplexConjugate, FieldExpOps};
 use crate::core::fields::cm31::CM31;
 use crate::core::fields::m31::M31;

@@ -31,7 +31,7 @@ impl<MC: MerkleChannel> CommitmentSchemeVerifier<MC> {
     }
 
     /// A [TreeVec<ColumnVec>] of the log sizes of each column in each commitment tree.
-    fn column_log_sizes(&self) -> TreeVec<ColumnVec<u32>> {
+    pub fn column_log_sizes(&self) -> TreeVec<ColumnVec<u32>> {
         self.trees
             .as_ref()
             .map(|tree| tree.column_log_sizes.clone())
@@ -58,7 +58,7 @@ impl<MC: MerkleChannel> CommitmentSchemeVerifier<MC> {
         sampled_points: TreeVec<ColumnVec<Vec<CirclePoint<SecureField>>>>,
         proof: CommitmentSchemeProof<MC::H>,
         channel: &mut MC::C,
-    ) -> Result<QueriesWithBranching, VerificationError> {
+    ) -> Result<(QueriesWithBranching, TreeVec<ColumnVec<u32>>), VerificationError> {
         channel.mix_felts(&proof.sampled_values.clone().flatten_cols());
         let random_coeff = channel.draw_felt();
 
@@ -83,7 +83,6 @@ impl<MC: MerkleChannel> CommitmentSchemeVerifier<MC> {
         if channel.trailing_zeros() < self.config.pow_bits {
             return Err(VerificationError::ProofOfWork);
         }
-
         // Get FRI query positions.
         let (query_positions_per_log_size, queries) =
             fri_verifier.sample_query_positions(channel);
@@ -121,7 +120,7 @@ impl<MC: MerkleChannel> CommitmentSchemeVerifier<MC> {
         )?;
 
         fri_verifier.decommit(fri_answers)?;
-
-        Ok(queries.into_with_branching())
+        let log_sizes: TreeVec<Vec<u32>> = self.column_log_sizes().map(|col| col.into_iter().map(|c| c.saturating_sub(self.config.fri_config.log_blowup_factor)).collect());
+        Ok((queries.into_with_branching(), log_sizes))
     }
 }
