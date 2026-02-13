@@ -326,4 +326,4 @@ macro_rules! relation {
         }
     };
 }
-pub(crate) use relation;
+pub use relation;
